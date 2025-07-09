@@ -159,6 +159,16 @@ int main(void)
                 }
                 printf("Received %d bytes: %s\n", bytes_recvd, rx_msg);
             }
+            else {
+                if(bytes_recvd == 0) {
+                    printf("socket closed by peer\n");
+                }
+                else {
+                    printf("recv error=%d\n", bytes_recvd);
+                }
+                // dont attempt to send if closed or error
+                break;
+            }
 
             /* Echo received data */
             bytes_sent = send(cfd, rx_msg, strlen(rx_msg), 0);
