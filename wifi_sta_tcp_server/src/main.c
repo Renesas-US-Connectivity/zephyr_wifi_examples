@@ -122,6 +122,17 @@ int main(void)
 		}
         printf("Socket created: %d\n", sfd);
 
+        printf("Setting socket options...\n");
+        int reuse = 1;
+        // TODO map these defines in zephyr to RA6W1
+        // SOL_SOCKET = 0xfff on RA6W1
+        // SO_REUSEADDR = 4 on RA6W1
+        if (setsockopt(sfd, 0xfff, 4, &reuse, sizeof(reuse)) < 0) {
+    	    printf("Failed to set socket options: %d\n", sfd);
+    	    close(sfd);
+    	    return 0;
+    	}
+
         server_addr.sin_family = AF_INET;
     	server_addr.sin_port = htons(SERVER_PORT);
    	    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -159,6 +170,16 @@ int main(void)
                 }
                 printf("Received %d bytes: %s\n", bytes_recvd, rx_msg);
             }
+            else {
+                if(bytes_recvd == 0) {
+                    printf("socket closed by peer\n");
+                }
+                else {
+                    printf("recv error=%d\n", bytes_recvd);
+                }
+                // dont attempt to send if closed or error
+                break;
+            }
 
             /* Echo received data */
             bytes_sent = send(cfd, rx_msg, strlen(rx_msg), 0);
@@ -173,6 +194,9 @@ int main(void)
 			printf("Failed to close socket\n");
 			return 0;
 		}
+        else {
+            printf("Socket successfully closed\n");
+        }
 	}
 
 	return 0;
