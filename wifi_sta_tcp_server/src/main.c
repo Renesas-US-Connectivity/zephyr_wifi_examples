@@ -183,6 +183,9 @@ int main(void)
 			printf("Failed to close socket\n");
 			return 0;
 		}
+        else {
+            printf("Socket successfully closed\n");
+        }
 	}
 
 	return 0;
