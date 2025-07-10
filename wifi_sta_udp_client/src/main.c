@@ -20,6 +20,7 @@
 #define CLIENT_PORT				53704
 
 /* Test message configuration */
+#define TX_MESSAGE_LEN_MAX		32
 #define RX_MESSAGE_LEN_MAX		32
 
 static struct net_mgmt_event_callback cb;
@@ -62,6 +63,7 @@ int main(void)
 	struct sockaddr_in server_addr;
     struct sockaddr_in client_addr;
     socklen_t client_addr_len;
+    char tx_msg[TX_MESSAGE_LEN_MAX];
 	char rx_msg[RX_MESSAGE_LEN_MAX] = "UDP SERVER LIVES!";
     char if_addr_s[NET_IPV4_ADDR_LEN];
     char client_addr_s[INET_ADDRSTRLEN];
@@ -138,11 +140,12 @@ int main(void)
         server_addr.sin_port = htons(SERVER_PORT);
         server_addr.sin_addr.s_addr = inet_addr(SERVER_ADDR);
 
+        uint32_t seq_nbr = 0;
         while(1) {
-
+            snprintf(tx_msg, TX_MESSAGE_LEN_MAX, "Test message %d..!", seq_nbr++);
             bytes_sent = sendto(sfd, 
-                                rx_msg, 
-                                strlen(rx_msg), 
+                                tx_msg, 
+                                strlen(tx_msg), 
                                 0, 
                                 (struct sockaddr *)&server_addr,
                                 sizeof(server_addr) );
