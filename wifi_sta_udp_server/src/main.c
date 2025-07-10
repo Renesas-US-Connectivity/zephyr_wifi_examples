@@ -144,23 +144,34 @@ int main(void)
                 if (bytes_recvd < RX_MESSAGE_LEN_MAX) {
                     rx_msg[bytes_recvd] = '\0';
                 }
-                // TODO why does port appear different than RA6W1?
-                printf("client addr: family=%d, port=%d, %u", client_addr.sin_family, client_addr.sin_port, client_addr.sin_addr.s_addr);
+                
+                // TODO buf is assuming IPV4, extend for IPV6
                 char buf[INET_ADDRSTRLEN ];
-                //net_addr_ntop(client_addr.sin_family, &client_addr.sin_addr, ip_addr, sizeof(ip_addr));
-                net_addr_ntop(AF_INET, &client_addr.sin_addr, buf, sizeof(buf));
+                net_addr_ntop(client_addr.sin_family, &client_addr.sin_addr, buf, sizeof(buf));
+                // TODO port bytes are swapped. Fix needed in offload driver
                 printf("Received %d bytes from %s:%d : %s\n", bytes_recvd, buf, client_addr.sin_port, rx_msg);
+
+                /* Echo received data */
+                bytes_sent = sendto(sfd, rx_msg, strlen(rx_msg), 0, &client_addr, sizeof(client_addr));
+
+                if (bytes_sent > 0) {
+                    printf("Sent %d bytes: %s\n", bytes_sent, rx_msg);
+                }
+                else {
+                    // socket error, close
+                    break;
+                }
             }
-
-            /* Echo received data */
-            //client_addr.sin_port = SERVER_PORT;
-            //bytes_sent = sendto(sfd, rx_msg, strlen(rx_msg), 0, &client_addr, sizeof(client_addr));
-
-            bytes_sent = sendto(sfd, rx_msg, strlen(rx_msg), 0, &client_addr, 16);
-            if (bytes_sent > 0) {
-                printf("Sent %d bytes: %s\n", bytes_sent, rx_msg);
+            else {
+                if(bytes_recvd == 0) {
+                    printf("socket closed by peer\n");
+                }
+                else {
+                    printf("recv error=%d\n", bytes_recvd);
+                }
+                // dont attempt to send if closed or error
+                break;
             }
-
         }           
 
 		printf("Closing socket (%d)..\n", sfd);
@@ -169,6 +180,9 @@ int main(void)
 			printf("Failed to close socket\n");
 			return 0;
 		}
+        else {
+            printf("Socket successfully closed\n");
+        }
 	}
 
 	return 0;
