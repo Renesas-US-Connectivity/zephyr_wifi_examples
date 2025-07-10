@@ -144,16 +144,23 @@ int main(void)
                 if (bytes_recvd < RX_MESSAGE_LEN_MAX) {
                     rx_msg[bytes_recvd] = '\0';
                 }
-                printf("Received %d bytes: %s\n", bytes_recvd, rx_msg);
+                // TODO why does port appear different than RA6W1?
+                printf("client addr: family=%d, port=%d, %u", client_addr.sin_family, client_addr.sin_port, client_addr.sin_addr.s_addr);
+                char buf[INET_ADDRSTRLEN ];
+                //net_addr_ntop(client_addr.sin_family, &client_addr.sin_addr, ip_addr, sizeof(ip_addr));
+                net_addr_ntop(AF_INET, &client_addr.sin_addr, buf, sizeof(buf));
+                printf("Received %d bytes from %s:%d : %s\n", bytes_recvd, buf, client_addr.sin_port, rx_msg);
             }
 
             /* Echo received data */
-           /*bytes_sent = sendto(sfd, rx_msg, strlen(rx_msg), 0);
+            //client_addr.sin_port = SERVER_PORT;
+            //bytes_sent = sendto(sfd, rx_msg, strlen(rx_msg), 0, &client_addr, sizeof(client_addr));
+
+            bytes_sent = sendto(sfd, rx_msg, strlen(rx_msg), 0, &client_addr, 16);
             if (bytes_sent > 0) {
                 printf("Sent %d bytes: %s\n", bytes_sent, rx_msg);
-            }*/
+            }
 
-            //k_msleep(5000);
         }           
 
 		printf("Closing socket (%d)..\n", sfd);
