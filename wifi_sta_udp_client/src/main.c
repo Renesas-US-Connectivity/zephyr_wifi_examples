@@ -165,8 +165,6 @@ int main(void)
                     // TODO port bytes are swapped. Fix needed in offload driver
                     printf("Received %d bytes from %s:%d : %s\n", bytes_recvd, buf, client_addr.sin_port, rx_msg);
                 }
-                
-                k_msleep(5000);
             }
             else {
                 printf("sendto error=%d\n", bytes_sent);
