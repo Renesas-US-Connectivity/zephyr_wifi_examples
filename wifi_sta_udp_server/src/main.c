@@ -15,8 +15,6 @@
 #define WIFI_PSK				"74512829"
 
 /* UDP configuration */
-#define CLIENT_ADDR				"192.168.50.55"
-#define CLIENT_PORT				53704
 #define SERVER_PORT				53704
 
 /* Test message configuration */

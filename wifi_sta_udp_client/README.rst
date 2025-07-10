@@ -1,7 +1,7 @@
 Overview
 ********
 
-Example implementation of a Zephyr based TCP server using a Wi-Fi interface.
+Example implementation of a Zephyr based UDP client using a Wi-Fi interface.
 The Wi-Fi interface operates in station mode. The SSID and password of the 
 Wi-Fi Access Point to which it will connect are configured via the following
 macros:
@@ -11,13 +11,14 @@ macros:
    #define WIFI_SSID            "TP-Link_1218" 
    #define WIFI_PSK             "74512829"
 
-The application acts as a TCP echo server, transmitting any data received
-back to the client. The port number of the server is configured via the
-following macro:
+The application transmits data to a UDP server and then waits for a response.
+The address and port number of the server are configured via the following
+macros:
 
 .. code-block:: SERVER
 
-   #define SERVER_PORT          53704
+    #define SERVER_ADDR				"192.168.50.55"
+    #define SERVER_PORT				53704
 
 Received data is printed to the console.
 
