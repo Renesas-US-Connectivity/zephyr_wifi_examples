@@ -169,6 +169,12 @@ int main(void)
                     rx_msg[bytes_recvd] = '\0';
                 }
                 printf("Received %d bytes: %s\n", bytes_recvd, rx_msg);
+
+                /* Echo received data */
+                bytes_sent = send(cfd, rx_msg, strlen(rx_msg), 0);
+                if (bytes_sent > 0) {
+                    printf("Sent %d bytes: %s\n", bytes_sent, rx_msg);
+                }
             }
             else {
                 if(bytes_recvd == 0) {
@@ -179,12 +185,6 @@ int main(void)
                 }
                 // dont attempt to send if closed or error
                 break;
-            }
-
-            /* Echo received data */
-            bytes_sent = send(cfd, rx_msg, strlen(rx_msg), 0);
-            if (bytes_sent > 0) {
-                printf("Sent %d bytes: %s\n", bytes_sent, rx_msg);
             }
         }           
 
