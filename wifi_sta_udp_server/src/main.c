@@ -14,7 +14,7 @@
 #define WIFI_SSID				"TP-Link_1218"
 #define WIFI_PSK				"74512829"
 
-/* UDP server configuration */
+/* UDP configuration */
 #define CLIENT_ADDR				"192.168.50.55"
 #define CLIENT_PORT				53704
 #define SERVER_PORT				53704
