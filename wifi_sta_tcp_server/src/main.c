@@ -25,11 +25,11 @@ static struct net_mgmt_event_callback cb;
 K_SEM_DEFINE(net_conn_sem, 0, 1);
 
 static void wifi_event_handler(struct net_mgmt_event_callback *cb,
-				   uint32_t mgmt_event, struct net_if *iface)
+				   uint64_t mgmt_event, struct net_if *iface)
 {
 	const struct wifi_status *status = (const struct wifi_status *)cb->info;
 
-	printf("Wi-Fi event - layer: %x code: %x cmd: %x status: %d\n",
+	printf("Wi-Fi event - layer: %llx code: %llx cmd: %llx status: %d\n",
 		NET_MGMT_GET_LAYER(mgmt_event), NET_MGMT_GET_LAYER_CODE(mgmt_event),
 		NET_MGMT_GET_COMMAND(mgmt_event), status->status);
 	
