@@ -103,16 +103,19 @@ int main(void)
 	}
 
 	printf("Joined network!\n");
-	if_addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
 
-	if (if_addr) {
-		net_addr_ntop(AF_INET, if_addr->s4_addr, if_addr_s, sizeof(if_addr_s));
-		printf("Address: %s\n", if_addr_s);
-	}
+	do {
+		printf("Waiting for IP address to be assigned...\n");
 
-	/* Temporary fix to overcome issue with the RA6W1 not having completed
-	   DHCP process when WIFI connect function returns. */
-	k_msleep(5000);
+		if_addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
+
+		if (if_addr) {
+			net_addr_ntop(AF_INET, if_addr->s4_addr, if_addr_s, sizeof(if_addr_s));
+			printf("Address: %s\n", if_addr_s);
+		} else {
+			k_msleep(1000);
+		}		
+	} while (if_addr == NULL);
 
 	while (1) {
 		sfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
