@@ -50,7 +50,6 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 int main(void)
 {
 	int sfd;
-    int cfd;
 	int bytes_sent;
 	int bytes_recvd;
 	struct net_if *iface;
@@ -58,11 +57,9 @@ int main(void)
 	struct wifi_connect_req_params config = {0};
 	struct wifi_version version = {0};
 	struct sockaddr_in server_addr;
-    struct sockaddr_in client_addr;
-    socklen_t client_addr_len;
+    struct sockaddr_in client_addr;       
 	char rx_msg[RX_MESSAGE_LEN_MAX];
     char if_addr_s[NET_IPV4_ADDR_LEN];
-    char client_addr_s[INET_ADDRSTRLEN];
 
 	printf("Starting Wi-Fi station UDP server...\n");
 
@@ -103,16 +100,19 @@ int main(void)
 	}
 
 	printf("Joined network!\n");
-	if_addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
 
-	if (if_addr) {
-		net_addr_ntop(AF_INET, if_addr->s4_addr, if_addr_s, sizeof(if_addr_s));
-		printf("Address: %s\n", if_addr_s);
-	}
+	do {
+		printf("Waiting for IP address to be assigned...\n");
 
-	/* Temporary fix to overcome issue with the RA6W1 not having completed
-	   DHCP process when WIFI connect function returns. */
-	k_msleep(5000);
+		if_addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
+
+		if (if_addr) {
+			net_addr_ntop(AF_INET, if_addr->s4_addr, if_addr_s, sizeof(if_addr_s));
+			printf("Address: %s\n", if_addr_s);
+		} else {
+			k_msleep(1000);
+		}		
+	} while (if_addr == NULL);
 
 	while (1) {
 		sfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -133,9 +133,7 @@ int main(void)
         }
 
         while(1) {
-
-            struct sockaddr_in client_addr; 
-            /* Wait for client to send us some data */
+			/* Wait for client to send us some data */
             bytes_recvd = recvfrom(sfd, rx_msg, sizeof(rx_msg), 0, &client_addr, sizeof(client_addr));
             if (bytes_recvd > 0) {
                 /* NULL terminate received data */
@@ -144,7 +142,7 @@ int main(void)
                 }
                 
                 // TODO buf is assuming IPV4, extend for IPV6
-                char buf[INET_ADDRSTRLEN ];
+                char buf[INET_ADDRSTRLEN];
                 net_addr_ntop(client_addr.sin_family, &client_addr.sin_addr, buf, sizeof(buf));
                 // TODO port bytes are swapped. Fix needed in offload driver
                 printf("Received %d bytes from %s:%d : %s\n", bytes_recvd, buf, client_addr.sin_port, rx_msg);
@@ -156,7 +154,7 @@ int main(void)
                     printf("Sent %d bytes: %s\n", bytes_sent, rx_msg);
                 }
                 else {
-                    // socket error, close
+                    /* Socket error, close */
                     break;
                 }
             }
@@ -167,7 +165,7 @@ int main(void)
                 else {
                     printf("recv error=%d\n", bytes_recvd);
                 }
-                // dont attempt to send if closed or error
+                /* Don't attempt to send if closed or error */
                 break;
             }
         }           

@@ -15,7 +15,7 @@
 #define WIFI_PSK				"74512829"
 
 /* UDP configuration */
-#define SERVER_ADDR				"192.168.50.55"
+#define SERVER_ADDR				"192.168.0.101"
 #define SERVER_PORT				53704
 #define CLIENT_PORT				53704
 
@@ -53,7 +53,6 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 int main(void)
 {
 	int sfd;
-    int cfd;
 	int bytes_sent;
 	int bytes_recvd;
 	struct net_if *iface;
@@ -62,11 +61,9 @@ int main(void)
 	struct wifi_version version = {0};
 	struct sockaddr_in server_addr;
     struct sockaddr_in client_addr;
-    socklen_t client_addr_len;
     char tx_msg[TX_MESSAGE_LEN_MAX];
-	char rx_msg[RX_MESSAGE_LEN_MAX] = "UDP SERVER LIVES!";
+	char rx_msg[RX_MESSAGE_LEN_MAX];
     char if_addr_s[NET_IPV4_ADDR_LEN];
-    char client_addr_s[INET_ADDRSTRLEN];
 
 	printf("Starting Wi-Fi station UDP client...\n");
 
@@ -107,16 +104,19 @@ int main(void)
 	}
 
 	printf("Joined network!\n");
-	if_addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
 
-	if (if_addr) {
-		net_addr_ntop(AF_INET, if_addr->s4_addr, if_addr_s, sizeof(if_addr_s));
-		printf("Address: %s\n", if_addr_s);
-	}
+	do {
+		printf("Waiting for IP address to be assigned...\n");
 
-	/* Temporary fix to overcome issue with the RA6W1 not having completed
-	   DHCP process when WIFI connect function returns. */
-	k_msleep(5000);
+		if_addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
+
+		if (if_addr) {
+			net_addr_ntop(AF_INET, if_addr->s4_addr, if_addr_s, sizeof(if_addr_s));
+			printf("Address: %s\n", if_addr_s);
+		} else {
+			k_msleep(1000);
+		}		
+	} while (if_addr == NULL);
 
     while (1) {
         sfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -150,7 +150,7 @@ int main(void)
                                 (struct sockaddr *)&server_addr,
                                 sizeof(server_addr) );
             if (bytes_sent > 0) {
-                printf("Sent %d bytes: %s\n", bytes_sent, rx_msg);
+                printf("Sent %d bytes: %s\n", bytes_sent, tx_msg);
 
                 /* Listen for resposne */
                 printf("Waiting for resposne...\n");
