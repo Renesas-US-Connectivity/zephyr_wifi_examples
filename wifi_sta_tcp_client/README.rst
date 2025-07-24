@@ -27,28 +27,31 @@ Requirements
 
 The following board configurations are currently supported:
 
-#. EK-RA6M4 + EK-RA6W1 connected using a 4-wire UART as follows:
+#. EK-RA8M1 + QCIOT-RRQ61051EVZ (PMOD UART)
 
-+------------+-------------+
-| EK-RA6M4   | EK-RA6W1    |
-+------------+-------------+
-| P610 (CTS) | P0_08 (RTS) |
-+------------+-------------+
-| P611 (RTS) | P0_07 (CTS) |
-+------------+-------------+
-| P613 (TXD) | P0_04 (RXD) |
-+------------+-------------+
-| P614 (RXD) | P0_05 (TXD) |
-+------------+-------------+
+Connect the QCIOT-RRQ61051EVZ to the PMOD1 interface on the EK-RA8M1 and the
+following pins will be used:
+
++------------+-------------------+
+| EK-RA8M1   | QCIOT-RRQ61051EVZ |
++------------+-------------------+
+| P613 (CTS) | P0_08 (RTS)       |
++------------+-------------------+
+| P612 (RTS) | P0_09 (CTS)       |
++------------+-------------------+
+| P609 (TXD) | P0_05 (RXD)       |
++------------+-------------------+
+| P610 (RXD) | P0_12 (TXD)       |
++------------+-------------------+
 
 Building and Running
 ********************
 
-Build and flash for the EK-RA6M4 and the RA6W1 WIFI board:
+Build and flash for the EK-RA8M1 connected to the RRQ61051EVZ using the PMOD UART interface:
 
 .. code-block:: none
 
-   west build -b ek_ra6m4 wifi_sta_tcp_client -p always
+   west build wifi_sta_tcp_client -b ek_ra8m1 -p always -DSHIELD=renesas_qciot_rrq61051evz_pmod
    west flash
 
 After flashing, you can observe the state of the application via the console.
