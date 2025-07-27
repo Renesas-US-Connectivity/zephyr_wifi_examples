@@ -104,6 +104,7 @@ int main(void)
 
 	printf("Joined network!\n");
 
+#if defined (CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_PMOD)
 	do {
 		printf("Waiting for IP address to be assigned...\n");
 
@@ -116,6 +117,9 @@ int main(void)
 			k_msleep(1000);
 		}		
 	} while (if_addr == NULL);
+#else
+	k_msleep(3000);
+#endif
 
 	while (1) {
 		sfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
