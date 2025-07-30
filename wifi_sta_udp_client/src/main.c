@@ -23,9 +23,15 @@
 #define TX_MESSAGE_LEN_MAX		32
 #define RX_MESSAGE_LEN_MAX		32
 
+/* Wi-Fi connection events */
+#define WIFI_EVENT_CONNECT_SUCCESS	BIT(0)
+#define WIFI_EVENT_CONNECT_FAILED	BIT(1)
+#define WIFI_EVENT_ALL				(WIFI_EVENT_CONNECT_SUCCESS | \
+									 WIFI_EVENT_CONNECT_FAILED)
+
 static struct net_mgmt_event_callback cb;
 
-K_SEM_DEFINE(net_conn_sem, 0, 1);
+K_EVENT_DEFINE(connect_event);
 
 static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 				   uint64_t mgmt_event, struct net_if *iface)
@@ -39,10 +45,11 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 	switch (mgmt_event) {
 	case NET_EVENT_WIFI_CONNECT_RESULT:
 		if (status->status == 0) {
-			k_sem_give(&net_conn_sem);
 			printf("Connected to AP!\n");
+			k_event_set(&connect_event, WIFI_EVENT_CONNECT_SUCCESS);
 		} else {
 			printf("Failed to connect to AP!\n");
+			k_event_set(&connect_event, WIFI_EVENT_CONNECT_FAILED);
 		}
 		break;
 	default:
@@ -61,6 +68,7 @@ int main(void)
 	struct wifi_version version = {0};
 	struct sockaddr_in server_addr;
     struct sockaddr_in client_addr;
+	uint32_t events;
     char tx_msg[TX_MESSAGE_LEN_MAX];
 	char rx_msg[RX_MESSAGE_LEN_MAX];
     char if_addr_s[NET_IPV4_ADDR_LEN];
@@ -91,19 +99,21 @@ int main(void)
 	config.channel = WIFI_CHANNEL_ANY;
 	config.band = WIFI_FREQ_BAND_2_4_GHZ;
 
-	printf("Connecting to network (SSID: %s)\n", config.ssid);
+	do {
+		printf("Connecting to network (SSID: %s)\n", config.ssid);
 
-	if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &config,
-				sizeof(struct wifi_connect_req_params))) {
-		printf("Wi-Fi connect request failed\n");
-		return 0;
-	}
+		if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &config,
+					sizeof(struct wifi_connect_req_params))) {
+			printf("Wi-Fi connect request failed\n");
+			return 0;
+		}
 
-	while (k_sem_take(&net_conn_sem, K_MSEC(1000)) != 0) {
-		printf("Waiting for network connection..\n");
-	}
-
-	printf("Joined network!\n");
+		events = k_event_wait(&connect_event, WIFI_EVENT_ALL, true, K_FOREVER);	
+		if (events == WIFI_EVENT_CONNECT_SUCCESS) {
+			printf("Joined network!\n");
+			break;
+		}		
+	} while (1);
 
 #if defined (CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_PMOD)
 	do {
