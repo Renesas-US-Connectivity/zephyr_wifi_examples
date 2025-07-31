@@ -75,14 +75,14 @@ Build and flash for the EK-RA8M1 connected to the RRQ61051EVZ using the PMOD UAR
 
 .. code-block:: none
 
-   west build wifi_sta_tcp_client -b ek_ra8m1 -p always -DSHIELD=renesas_qciot_rrq61051evz_pmod
+   west build wifi_sta_udp_server -b ek_ra8m1 -p always -DSHIELD=renesas_qciot_rrq61051evz_pmod
    west flash
 
 Build and flash for the EK-RA6M4 connected to the RRQ61051EVZ using the MikroBUS SPI interface:
 
 .. code-block:: none
 
-   west build wifi_sta_tcp_client -b ek_ra6m4 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus
+   west build wifi_sta_udp_server -b ek_ra6m4 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus
    west flash
 
 After flashing, you can observe the state of the application via the console.
