@@ -11,14 +11,14 @@
 #include <zephyr/net/net_if.h>
 
 /* Wi-Fi network configuration */
-#define WIFI_SSID				"TP-Link_1218"
-#define WIFI_PSK				"74512829"
+#define WIFI_SSID					"TP-Link_1218"
+#define WIFI_PSK					"74512829"
 
 /* UDP configuration */
-#define SERVER_PORT				53704
+#define SERVER_PORT					53704
 
 /* Test message configuration */
-#define RX_MESSAGE_LEN_MAX		32
+#define RX_MESSAGE_LEN_MAX			32
 
 /* Wi-Fi connection events */
 #define WIFI_EVENT_CONNECT_SUCCESS	BIT(0)
@@ -64,10 +64,12 @@ int main(void)
 	struct wifi_connect_req_params config = {0};
 	struct wifi_version version = {0};
 	struct sockaddr_in server_addr;
-    struct sockaddr_in client_addr; 
+    struct sockaddr_in client_addr;
+	socklen_t addr_len;
 	uint32_t events;      
 	char rx_msg[RX_MESSAGE_LEN_MAX];
     char if_addr_s[NET_IPV4_ADDR_LEN];
+	char buf[INET_ADDRSTRLEN];
 
 	printf("Starting Wi-Fi station UDP server...\n");
 
@@ -148,21 +150,30 @@ int main(void)
 
         while(1) {
 			/* Wait for client to send us some data */
-            bytes_recvd = recvfrom(sfd, rx_msg, sizeof(rx_msg), 0, &client_addr, sizeof(client_addr));
+            bytes_recvd = recvfrom(sfd,
+								   rx_msg,
+								   sizeof(rx_msg),
+								   0,
+								   (struct sockaddr *)&client_addr,
+								   &addr_len);
             if (bytes_recvd > 0) {
                 /* NULL terminate received data */
                 if (bytes_recvd < RX_MESSAGE_LEN_MAX) {
                     rx_msg[bytes_recvd] = '\0';
                 }
-                
-                // TODO buf is assuming IPV4, extend for IPV6
-                char buf[INET_ADDRSTRLEN];
-                net_addr_ntop(client_addr.sin_family, &client_addr.sin_addr, buf, sizeof(buf));
-                // TODO port bytes are swapped. Fix needed in offload driver
-                printf("Received %d bytes from %s:%d : %s\n", bytes_recvd, buf, client_addr.sin_port, rx_msg);
+
+                net_addr_ntop(client_addr.sin_family, 
+					&client_addr.sin_addr, buf, sizeof(buf));
+                printf("Received %d bytes from %s:%d - %s\n", 
+					bytes_recvd, buf, client_addr.sin_port, rx_msg);
 
                 /* Echo received data */
-                bytes_sent = sendto(sfd, rx_msg, strlen(rx_msg), 0, &client_addr, sizeof(client_addr));
+                bytes_sent = sendto(sfd,
+									rx_msg,
+									strlen(rx_msg),
+									0,
+									(struct sockaddr *)&client_addr,
+									sizeof(client_addr));
 
                 if (bytes_sent > 0) {
                     printf("Sent %d bytes: %s\n", bytes_sent, rx_msg);
@@ -177,7 +188,7 @@ int main(void)
                     printf("socket closed by peer\n");
                 }
                 else {
-                    printf("recv error=%d\n", bytes_recvd);
+                    printf("recvfrom error: %d\n", bytes_recvd);
                 }
                 /* Don't attempt to send if closed or error */
                 break;
