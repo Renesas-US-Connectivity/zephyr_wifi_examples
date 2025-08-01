@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <stdio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/socket.h>
 #include <zephyr/net/net_if.h>
+
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 /* Wi-Fi network configuration */
 #define WIFI_SSID					"TP-Link_1218"
@@ -35,17 +37,17 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 {
 	const struct wifi_status *status = (const struct wifi_status *)cb->info;
 
-	printf("Wi-Fi event - layer: %llx code: %llx cmd: %llx status: %d\n",
+	LOG_INF("Wi-Fi event - layer: %llx code: %llx cmd: %llx status: %d\n",
 		NET_MGMT_GET_LAYER(mgmt_event), NET_MGMT_GET_LAYER_CODE(mgmt_event),
 		NET_MGMT_GET_COMMAND(mgmt_event), status->status);
 	
 	switch (mgmt_event) {
 	case NET_EVENT_WIFI_CONNECT_RESULT:
 		if (status->status == 0) {
-			printf("Connected to AP!\n");
+			LOG_INF("Connected to AP!\n");
 			k_event_set(&connect_event, WIFI_EVENT_CONNECT_SUCCESS);
 		} else {
-			printf("Failed to connect to AP!\n");
+			LOG_INF("Failed to connect to AP!\n");
 			k_event_set(&connect_event, WIFI_EVENT_CONNECT_FAILED);
 		}
 		break;
@@ -71,11 +73,11 @@ int main(void)
     char if_addr_s[NET_IPV4_ADDR_LEN];
 	char buf[INET_ADDRSTRLEN];
 
-	printf("Starting Wi-Fi station UDP server...\n");
+	LOG_INF("Starting Wi-Fi station UDP server...\n");
 
 	iface = net_if_get_wifi_sta();
 	if (iface == NULL) {
-		printf("Cannot find the Wi-Fi interface\n");
+		LOG_INF("Cannot find the Wi-Fi interface\n");
 		return 0;
 	}
 
@@ -85,8 +87,8 @@ int main(void)
 
 	if (net_mgmt(NET_REQUEST_WIFI_VERSION, iface, &version,
 			sizeof(version)) == 0) {
-		printf("Wi-Fi Driver Version: %s\n", version.drv_version);
-		printf("Wi-Fi Firmware Version: %s\n", version.fw_version);
+		LOG_INF("Wi-Fi Driver Version: %s\n", version.drv_version);
+		LOG_INF("Wi-Fi Firmware Version: %s\n", version.fw_version);
 	}
 
 	config.ssid = (const uint8_t *)WIFI_SSID;
@@ -98,30 +100,30 @@ int main(void)
 	config.band = WIFI_FREQ_BAND_2_4_GHZ;
 
 	do {
-		printf("Connecting to network (SSID: %s)\n", config.ssid);
+		LOG_INF("Connecting to network (SSID: %s)\n", config.ssid);
 
 		if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &config,
 					sizeof(struct wifi_connect_req_params))) {
-			printf("Wi-Fi connect request failed\n");
+			LOG_INF("Wi-Fi connect request failed\n");
 			return 0;
 		}
 
 		events = k_event_wait(&connect_event, WIFI_EVENT_ALL, true, K_FOREVER);	
 		if (events == WIFI_EVENT_CONNECT_SUCCESS) {
-			printf("Joined network!\n");
+			LOG_INF("Joined network!\n");
 			break;
 		}		
 	} while (1);
 
 #if defined (CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_PMOD)
 	do {
-		printf("Waiting for IP address to be assigned...\n");
+		LOG_INF("Waiting for IP address to be assigned...\n");
 
 		if_addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
 
 		if (if_addr) {
 			net_addr_ntop(AF_INET, if_addr->s4_addr, if_addr_s, sizeof(if_addr_s));
-			printf("Address: %s\n", if_addr_s);
+			LOG_INF("Address: %s\n", if_addr_s);
 		} else {
 			k_msleep(1000);
 		}		
@@ -133,18 +135,18 @@ int main(void)
 	while (1) {
 		sfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 		if (sfd < 0) {
-			printf("Failed to created socket: %d\n", sfd);
+			LOG_INF("Failed to created socket: %d\n", sfd);
 			return 0;
 		}
-        printf("Socket created: %d\n", sfd);
+        LOG_INF("Socket created: %d\n", sfd);
 
         server_addr.sin_family = AF_INET;
     	server_addr.sin_port = htons(SERVER_PORT);
    	    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-  	    printf("Binding socket...\n");
+  	    LOG_INF("Binding socket...\n");
     	if ((bind(sfd, (struct sockaddr *)&server_addr, sizeof(server_addr))) != 0) {
-            printf("Failed to bind socket: %d\n", sfd);
+            LOG_INF("Failed to bind socket: %d\n", sfd);
     		return 0;
         }
 
@@ -164,7 +166,7 @@ int main(void)
 
                 net_addr_ntop(client_addr.sin_family, 
 					&client_addr.sin_addr, buf, sizeof(buf));
-                printf("Received %d bytes from %s:%d - %s\n", 
+                LOG_INF("Received %d bytes from %s:%d - %s\n", 
 					bytes_recvd, buf, client_addr.sin_port, rx_msg);
 
                 /* Echo received data */
@@ -176,7 +178,7 @@ int main(void)
 									sizeof(client_addr));
 
                 if (bytes_sent > 0) {
-                    printf("Sent %d bytes: %s\n", bytes_sent, rx_msg);
+                    LOG_INF("Sent %d bytes: %s\n", bytes_sent, rx_msg);
                 }
                 else {
                     /* Socket error, close */
@@ -185,24 +187,24 @@ int main(void)
             }
             else {
                 if(bytes_recvd == 0) {
-                    printf("socket closed by peer\n");
+                    LOG_INF("socket closed by peer\n");
                 }
                 else {
-                    printf("recvfrom error: %d\n", bytes_recvd);
+                    LOG_INF("recvfrom error: %d\n", bytes_recvd);
                 }
                 /* Don't attempt to send if closed or error */
                 break;
             }
         }           
 
-		printf("Closing socket (%d)..\n", sfd);
+		LOG_INF("Closing socket (%d)..\n", sfd);
 
 		if (close(sfd) < 0) {
-			printf("Failed to close socket\n");
+			LOG_INF("Failed to close socket\n");
 			return 0;
 		}
         else {
-            printf("Socket successfully closed\n");
+            LOG_INF("Socket successfully closed\n");
         }
 	}
 
