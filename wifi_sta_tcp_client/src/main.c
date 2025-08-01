@@ -31,6 +31,8 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 #define WIFI_EVENT_ALL				(WIFI_EVENT_CONNECT_SUCCESS | \
 									 WIFI_EVENT_CONNECT_FAILED)
 
+static void print_wifi_status(struct wifi_iface_status *status);
+
 static struct net_mgmt_event_callback cb;
 
 K_EVENT_DEFINE(connect_event);
@@ -67,6 +69,7 @@ int main(void)
 	struct net_if *iface;
     struct in_addr *if_addr;
 	struct wifi_connect_req_params config = {0};
+	struct wifi_iface_status status = {0};
 	struct wifi_version version = {0};
 	struct sockaddr_in server_addr;
 	uint32_t seq_nbr = 0;
@@ -134,6 +137,13 @@ int main(void)
 	k_msleep(3000);
 #endif
 
+	if (net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &status,
+		 sizeof(struct wifi_iface_status))) {
+		LOG_INF("Wi-Fi iface status request failed");
+		return 0;
+	}
+	print_wifi_status(&status);
+
 	while (1) {
 		fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 		if (fd < 0) {
@@ -181,4 +191,26 @@ int main(void)
 	}
 
 	return 0;
+}
+
+static void print_wifi_status(struct wifi_iface_status *status)
+{
+	LOG_INF("wifi_iface_status - state: %s", wifi_state_txt(status->state));
+	LOG_INF("wifi_iface_status - ssid_len: %d", status->ssid_len);
+	LOG_INF("wifi_iface_status - ssid: %s", status->ssid);
+	LOG_INF("wifi_iface_status - bssid: %x:%x:%x:%x:%x:%x",
+		status->bssid[0], status->bssid[1], status->bssid[2],
+		status->bssid[3], status->bssid[4], status->bssid[5]);	
+	LOG_INF("wifi_iface_status - band: %s", wifi_band_txt(status->band));
+	LOG_INF("wifi_iface_status - channel: %d", status->channel);
+	LOG_INF("wifi_iface_status - iface_mode: %s", wifi_mode_txt(status->iface_mode));
+	LOG_INF("wifi_iface_status - link_mode: %s", wifi_link_mode_txt(status->link_mode));
+	LOG_INF("wifi_iface_status - security: %s", wifi_wpa3_enterprise_txt(status->wpa3_ent_type));
+	LOG_INF("wifi_iface_status - security: %s", wifi_security_txt(status->security));
+	LOG_INF("wifi_iface_status - mfp: %s", wifi_mfp_txt(status->mfp));
+	LOG_INF("wifi_iface_status - rssi: %d", status->rssi);
+	LOG_INF("wifi_iface_status - dtim_period: %d", status->dtim_period);
+	LOG_INF("wifi_iface_status - beacon_interval: %d", status->beacon_interval);
+	LOG_INF("wifi_iface_status - twt_capable: %d", status->twt_capable);
+	LOG_INF("wifi_iface_status - current_phy_tx_rate: %f", (double)status->current_phy_tx_rate);
 }
