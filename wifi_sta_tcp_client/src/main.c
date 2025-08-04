@@ -120,7 +120,9 @@ int main(void)
 		}		
 	} while (1);
 
-#if defined (CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_PMOD)
+#if defined (CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_MIKROBUS_SPI)
+	k_msleep(3000);
+#else
 	do {
 		LOG_INF("Waiting for IP address to be assigned...");
 
@@ -133,8 +135,6 @@ int main(void)
 			k_msleep(1000);
 		}		
 	} while (if_addr == NULL);
-#else
-	k_msleep(3000);
 #endif
 
 	if (net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &status,

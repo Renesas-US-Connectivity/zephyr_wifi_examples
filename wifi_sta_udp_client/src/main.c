@@ -43,17 +43,17 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 {
 	const struct wifi_status *status = (const struct wifi_status *)cb->info;
 
-	LOG_INF("Wi-Fi event - layer: %llx code: %llx cmd: %llx status: %d\n",
+	LOG_INF("Wi-Fi event - layer: %llx code: %llx cmd: %llx status: %d",
 		NET_MGMT_GET_LAYER(mgmt_event), NET_MGMT_GET_LAYER_CODE(mgmt_event),
 		NET_MGMT_GET_COMMAND(mgmt_event), status->status);
 	
 	switch (mgmt_event) {
 	case NET_EVENT_WIFI_CONNECT_RESULT:
 		if (status->status == 0) {
-			LOG_INF("Connected to AP!\n");
+			LOG_INF("Connected to AP!");
 			k_event_set(&connect_event, WIFI_EVENT_CONNECT_SUCCESS);
 		} else {
-			LOG_INF("Failed to connect to AP!\n");
+			LOG_INF("Failed to connect to AP!");
 			k_event_set(&connect_event, WIFI_EVENT_CONNECT_FAILED);
 		}
 		break;
@@ -81,11 +81,11 @@ int main(void)
     char if_addr_s[NET_IPV4_ADDR_LEN];
 	char buf[INET_ADDRSTRLEN];
 
-	LOG_INF("Starting Wi-Fi station UDP client...\n");
+	LOG_INF("Starting Wi-Fi station UDP client...");
 
 	iface = net_if_get_wifi_sta();
 	if (iface == NULL) {
-		LOG_INF("Cannot find the Wi-Fi interface\n");
+		LOG_INF("Cannot find the Wi-Fi interface");
 		return 0;
 	}
 
@@ -95,8 +95,8 @@ int main(void)
 
 	if (net_mgmt(NET_REQUEST_WIFI_VERSION, iface, &version,
 			sizeof(version)) == 0) {
-		LOG_INF("Wi-Fi Driver Version: %s\n", version.drv_version);
-		LOG_INF("Wi-Fi Firmware Version: %s\n", version.fw_version);
+		LOG_INF("Wi-Fi Driver Version: %s", version.drv_version);
+		LOG_INF("Wi-Fi Firmware Version: %s", version.fw_version);
 	}
 
 	config.ssid = (const uint8_t *)WIFI_SSID;
@@ -108,36 +108,36 @@ int main(void)
 	config.band = WIFI_FREQ_BAND_2_4_GHZ;
 
 	do {
-		LOG_INF("Connecting to network (SSID: %s)\n", config.ssid);
+		LOG_INF("Connecting to network (SSID: %s)", config.ssid);
 
 		if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &config,
 					sizeof(struct wifi_connect_req_params))) {
-			LOG_INF("Wi-Fi connect request failed\n");
+			LOG_INF("Wi-Fi connect request failed");
 			return 0;
 		}
 
 		events = k_event_wait(&connect_event, WIFI_EVENT_ALL, true, K_FOREVER);	
 		if (events == WIFI_EVENT_CONNECT_SUCCESS) {
-			LOG_INF("Joined network!\n");
+			LOG_INF("Joined network!");
 			break;
 		}		
 	} while (1);
 
-#if defined (CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_PMOD)
+#if defined (CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_MIKROBUS_SPI)
+	k_msleep(3000);
+#else
 	do {
-		LOG_INF("Waiting for IP address to be assigned...\n");
+		LOG_INF("Waiting for IP address to be assigned...");
 
 		if_addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
 
 		if (if_addr) {
 			net_addr_ntop(AF_INET, if_addr->s4_addr, if_addr_s, sizeof(if_addr_s));
-			LOG_INF("Address: %s\n", if_addr_s);
+			LOG_INF("Address: %s", if_addr_s);
 		} else {
 			k_msleep(1000);
 		}		
 	} while (if_addr == NULL);
-#else
-	k_msleep(3000);
 #endif
 
 	if (net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &status,
@@ -150,18 +150,18 @@ int main(void)
     while (1) {
         sfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (sfd < 0) {
-            LOG_INF("Failed to created socket: %d\n", sfd);
+            LOG_INF("Failed to created socket: %d", sfd);
             return 0;
         }
-        LOG_INF("Socket created: %d\n", sfd);
+        LOG_INF("Socket created: %d", sfd);
 
         client_addr.sin_family = AF_INET;
         client_addr.sin_port = htons(CLIENT_PORT);
         client_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-        LOG_INF("Binding socket...\n");
+        LOG_INF("Binding socket...");
         if ((bind(sfd, (struct sockaddr *)&client_addr, sizeof(client_addr))) != 0) {
-            LOG_INF("Failed to bind socket: %d\n", sfd);
+            LOG_INF("Failed to bind socket: %d", sfd);
             return 0;
         }
 
@@ -178,11 +178,11 @@ int main(void)
                                 0, 
                                 (struct sockaddr *)&server_addr,
                                 sizeof(server_addr));
-            LOG_INF("Sent %d bytes: %s\n", bytes_sent, tx_msg);
+            LOG_INF("Sent %d bytes: %s", bytes_sent, tx_msg);
 			
 			if (bytes_sent > 0) {
                 /* Listen for resposne */
-                LOG_INF("Waiting for resposne...\n");
+                LOG_INF("Waiting for resposne...");
 
 				addr_len = sizeof(server_addr);
                 bytes_recvd = recvfrom(sfd,
@@ -199,25 +199,25 @@ int main(void)
                     
                     net_addr_ntop(server_addr.sin_family, 
 						&server_addr.sin_addr, buf, sizeof(buf));
-                    LOG_INF("Received %d bytes from %s:%d - %s\n", 
+                    LOG_INF("Received %d bytes from %s:%d - %s", 
 						bytes_recvd, buf, server_addr.sin_port, rx_msg);
                 }
             }
             else {
-                LOG_INF("sendto error: %d\n", bytes_sent);
+                LOG_INF("sendto error: %d", bytes_sent);
                 /* Don't attempt to read if there is an error */
                 break;
             } 
         }
 
-        LOG_INF("Closing socket (%d)..\n", sfd);
+        LOG_INF("Closing socket (%d)..", sfd);
 
         if (close(sfd) < 0) {
-            LOG_INF("Failed to close socket\n");
+            LOG_INF("Failed to close socket");
             return 0;
         }
         else {
-            LOG_INF("Socket successfully closed\n");
+            LOG_INF("Socket successfully closed");
         }
     }
 

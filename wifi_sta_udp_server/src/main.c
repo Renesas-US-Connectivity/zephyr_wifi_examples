@@ -76,11 +76,11 @@ int main(void)
     char if_addr_s[NET_IPV4_ADDR_LEN];
 	char buf[INET_ADDRSTRLEN];
 
-	LOG_INF("Starting Wi-Fi station UDP server...\n");
+	LOG_INF("Starting Wi-Fi station UDP server...");
 
 	iface = net_if_get_wifi_sta();
 	if (iface == NULL) {
-		LOG_INF("Cannot find the Wi-Fi interface\n");
+		LOG_INF("Cannot find the Wi-Fi interface");
 		return 0;
 	}
 
@@ -90,8 +90,8 @@ int main(void)
 
 	if (net_mgmt(NET_REQUEST_WIFI_VERSION, iface, &version,
 			sizeof(version)) == 0) {
-		LOG_INF("Wi-Fi Driver Version: %s\n", version.drv_version);
-		LOG_INF("Wi-Fi Firmware Version: %s\n", version.fw_version);
+		LOG_INF("Wi-Fi Driver Version: %s", version.drv_version);
+		LOG_INF("Wi-Fi Firmware Version: %s", version.fw_version);
 	}
 
 	config.ssid = (const uint8_t *)WIFI_SSID;
@@ -103,36 +103,36 @@ int main(void)
 	config.band = WIFI_FREQ_BAND_2_4_GHZ;
 
 	do {
-		LOG_INF("Connecting to network (SSID: %s)\n", config.ssid);
+		LOG_INF("Connecting to network (SSID: %s)", config.ssid);
 
 		if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &config,
 					sizeof(struct wifi_connect_req_params))) {
-			LOG_INF("Wi-Fi connect request failed\n");
+			LOG_INF("Wi-Fi connect request failed");
 			return 0;
 		}
 
 		events = k_event_wait(&connect_event, WIFI_EVENT_ALL, true, K_FOREVER);	
 		if (events == WIFI_EVENT_CONNECT_SUCCESS) {
-			LOG_INF("Joined network!\n");
+			LOG_INF("Joined network!");
 			break;
 		}		
 	} while (1);
 
-#if defined (CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_PMOD)
+#if defined (CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_MIKROBUS_SPI)
+	k_msleep(3000);
+#else
 	do {
-		LOG_INF("Waiting for IP address to be assigned...\n");
+		LOG_INF("Waiting for IP address to be assigned...");
 
 		if_addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
 
 		if (if_addr) {
 			net_addr_ntop(AF_INET, if_addr->s4_addr, if_addr_s, sizeof(if_addr_s));
-			LOG_INF("Address: %s\n", if_addr_s);
+			LOG_INF("Address: %s", if_addr_s);
 		} else {
 			k_msleep(1000);
 		}		
 	} while (if_addr == NULL);
-#else
-	k_msleep(3000);
 #endif
 
 	if (net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &status,
@@ -145,18 +145,18 @@ int main(void)
 	while (1) {
 		sfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 		if (sfd < 0) {
-			LOG_INF("Failed to created socket: %d\n", sfd);
+			LOG_INF("Failed to created socket: %d", sfd);
 			return 0;
 		}
-        LOG_INF("Socket created: %d\n", sfd);
+        LOG_INF("Socket created: %d", sfd);
 
         server_addr.sin_family = AF_INET;
     	server_addr.sin_port = htons(SERVER_PORT);
    	    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
-  	    LOG_INF("Binding socket...\n");
+  	    LOG_INF("Binding socket...");
     	if ((bind(sfd, (struct sockaddr *)&server_addr, sizeof(server_addr))) != 0) {
-            LOG_INF("Failed to bind socket: %d\n", sfd);
+            LOG_INF("Failed to bind socket: %d", sfd);
     		return 0;
         }
 
@@ -176,7 +176,7 @@ int main(void)
 
                 net_addr_ntop(client_addr.sin_family, 
 					&client_addr.sin_addr, buf, sizeof(buf));
-                LOG_INF("Received %d bytes from %s:%d - %s\n", 
+                LOG_INF("Received %d bytes from %s:%d - %s", 
 					bytes_recvd, buf, client_addr.sin_port, rx_msg);
 
                 /* Echo received data */
@@ -188,7 +188,7 @@ int main(void)
 									sizeof(client_addr));
 
                 if (bytes_sent > 0) {
-                    LOG_INF("Sent %d bytes: %s\n", bytes_sent, rx_msg);
+                    LOG_INF("Sent %d bytes: %s", bytes_sent, rx_msg);
                 }
                 else {
                     /* Socket error, close */
@@ -197,24 +197,24 @@ int main(void)
             }
             else {
                 if(bytes_recvd == 0) {
-                    LOG_INF("socket closed by peer\n");
+                    LOG_INF("socket closed by peer");
                 }
                 else {
-                    LOG_INF("recvfrom error: %d\n", bytes_recvd);
+                    LOG_INF("recvfrom error: %d", bytes_recvd);
                 }
                 /* Don't attempt to send if closed or error */
                 break;
             }
         }           
 
-		LOG_INF("Closing socket (%d)..\n", sfd);
+		LOG_INF("Closing socket (%d)..", sfd);
 
 		if (close(sfd) < 0) {
-			LOG_INF("Failed to close socket\n");
+			LOG_INF("Failed to close socket");
 			return 0;
 		}
         else {
-            LOG_INF("Socket successfully closed\n");
+            LOG_INF("Socket successfully closed");
         }
 	}
 
