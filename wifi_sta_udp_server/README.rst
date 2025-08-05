@@ -28,8 +28,8 @@ The following board configurations are currently supported:
 
 #. EK-RA8M1 + QCIOT-RRQ61051EVZ (PMOD UART)
 
-Connect the QCIOT-RRQ61051EVZ to the PMOD1 interface on the EK-RA8M1 and the
-following pins will be used:
+Connect the QCIOT-RRQ61051EVZ to the PMOD1 interface on the EK-RA8M1 (the
+following pins will be used):
 
 +------------+-------------------+
 | EK-RA8M1   | QCIOT-RRQ61051EVZ |
@@ -42,13 +42,28 @@ following pins will be used:
 +------------+-------------------+
 | P610 (RXD) | P0_12 (TXD)       |
 +------------+-------------------+
+| PA08 (RST) | RST_N (RST)       |
++------------+-------------------+
+
+#. EK-RA8M1 + QCIOT-RRQ61051EVZ (MikroBUS UART)
+
+Connect the QCIOT-RRQ61051EVZ to the MikroBUS interface on the EK-RA8M1 (the
+following pins will be used):
+
++------------+-------------------+
+| EK-RA8M1   | QCIOT-RRQ61051EVZ |
++------------+-------------------+
+| P310 (TXD) | P0_05 (RXD)       |
++------------+-------------------+
+| P309 (RXD) | P0_12 (TXD)       |
++------------+-------------------+
 | P502 (RST) | RST_N (RST)       |
 +------------+-------------------+
 
 #. EK-RA6M4 + QCIOT-RRQ61051EVZ (MikroBUS SPI)
 
-Connect the QCIOT-RRQ61051EVZ to the MikroBUS interface on the EK-RA6M4 and the
-following pins will be used:
+Connect the QCIOT-RRQ61051EVZ to the MikroBUS interface on the EK-RA6M4 (the
+following pins will be used):
 
 +-------------+-------------------+
 | EK-RA6M4    | QCIOT-RRQ61051EVZ |
@@ -78,11 +93,18 @@ Build and flash for the EK-RA8M1 connected to the RRQ61051EVZ using the PMOD UAR
    west build wifi_sta_udp_server -b ek_ra8m1 -p always -DSHIELD=renesas_qciot_rrq61051evz_pmod
    west flash
 
+Build and flash for the EK-RA8M1 connected to the RRQ61051EVZ using the MikroBUS UART interface:
+
+.. code-block:: none
+
+   west build wifi_sta_udp_server -b ek_ra8m1 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus_uart
+   west flash
+
 Build and flash for the EK-RA6M4 connected to the RRQ61051EVZ using the MikroBUS SPI interface:
 
 .. code-block:: none
 
-   west build wifi_sta_udp_server -b ek_ra6m4 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus
+   west build wifi_sta_udp_server -b ek_ra6m4 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus_spi
    west flash
 
 After flashing, you can observe the state of the application via the console.
