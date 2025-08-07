@@ -26,7 +26,9 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 #define TX_MESSAGE_LEN_MAX		32
 #define RX_MESSAGE_LEN_MAX		32
 
-/* Wi-Fi connection events */
+/* Wi-Fi events */
+#define WIFI_CALLBACK_EVENT_MASK	(NET_EVENT_WIFI_CONNECT_RESULT | \
+									 NET_EVENT_WIFI_DISCONNECT_RESULT)
 #define WIFI_EVENT_CONNECT_SUCCESS	BIT(0)
 #define WIFI_EVENT_CONNECT_FAILED	BIT(1)
 #define WIFI_EVENT_ALL				(WIFI_EVENT_CONNECT_SUCCESS | \
@@ -56,6 +58,9 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 			LOG_INF("Failed to connect to AP!");
 			k_event_set(&connect_event, WIFI_EVENT_CONNECT_FAILED);
 		}
+		break;
+	case NET_EVENT_WIFI_DISCONNECT_RESULT:
+		LOG_INF("Disconnected from AP!");
 		break;
 	default:
 		break;
@@ -90,7 +95,7 @@ int main(void)
 	}
 
 	net_mgmt_init_event_callback(&cb, wifi_event_handler, 
-		NET_EVENT_WIFI_CONNECT_RESULT);
+		WIFI_CALLBACK_EVENT_MASK);
 	net_mgmt_add_event_callback(&cb);
 
 	if (net_mgmt(NET_REQUEST_WIFI_VERSION, iface, &version,
