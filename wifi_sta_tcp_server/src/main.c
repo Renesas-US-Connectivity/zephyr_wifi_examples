@@ -97,8 +97,12 @@ int main(void)
 
 	if (net_mgmt(NET_REQUEST_WIFI_VERSION, iface, &version,
 			sizeof(version)) == 0) {
-		LOG_INF("Wi-Fi Driver Version: %s", version.drv_version);
-		LOG_INF("Wi-Fi Firmware Version: %s", version.fw_version);
+		if (version.drv_version) {
+			LOG_INF("Wi-Fi Driver Version: %s", version.drv_version);
+		}
+		if (version.fw_version) {
+			LOG_INF("Wi-Fi Firmware Version: %s", version.fw_version);
+		}
 	}
 
 	config.ssid = (const uint8_t *)WIFI_SSID;
