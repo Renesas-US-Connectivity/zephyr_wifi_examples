@@ -13,14 +13,14 @@
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 /* Wi-Fi network configuration */
-#define WIFI_SSID				"TP-Link_1218"
-#define WIFI_PSK				"74512829"
+#define WIFI_SSID					"TP-Link_1218"
+#define WIFI_PSK					"74512829"
 
 /* TCP server configuration */
-#define SERVER_PORT				53704
+#define SERVER_PORT					53704
 
 /* Test message configuration */
-#define RX_MESSAGE_LEN_MAX		32
+#define RX_MESSAGE_LEN_MAX			32
 
 /* Wi-Fi events */
 #define WIFI_CALLBACK_EVENT_MASK	(NET_EVENT_WIFI_CONNECT_RESULT | \
@@ -71,7 +71,6 @@ int main(void)
 	int bytes_sent;
 	int bytes_recvd;
 	struct net_if *iface;
-    struct in_addr *if_addr;
 	struct wifi_connect_req_params config = {0};
 	struct wifi_iface_status status = {0};
 	struct wifi_version version = {0};
@@ -80,8 +79,11 @@ int main(void)
     socklen_t client_addr_len;
 	uint32_t events;
 	char rx_msg[RX_MESSAGE_LEN_MAX];
+	char client_addr_s[INET_ADDRSTRLEN];
+#if defined (CONFIG_ERPC_TRANSPORT_UART)
+    struct in_addr *if_addr;
     char if_addr_s[NET_IPV4_ADDR_LEN];
-    char client_addr_s[INET_ADDRSTRLEN];
+#endif
 
 	LOG_INF("Starting Wi-Fi station TCP server...");
 
@@ -129,9 +131,7 @@ int main(void)
 		}		
 	} while (1);
 
-#if defined (CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_MIKROBUS_SPI)
-	k_msleep(3000);
-#else
+#if defined (CONFIG_ERPC_TRANSPORT_UART)
 	do {
 		LOG_INF("Waiting for IP address to be assigned...");
 
@@ -144,6 +144,8 @@ int main(void)
 			k_msleep(1000);
 		}		
 	} while (if_addr == NULL);
+#else
+	k_msleep(3000);
 #endif
 
 	if (net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &status,

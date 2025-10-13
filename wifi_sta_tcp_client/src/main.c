@@ -18,7 +18,7 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 #define WIFI_PSK					"74512829"
 
 /* TCP server configuration */
-#define SERVER_IP					"192.168.0.100"
+#define SERVER_IP					"192.168.0.101"
 #define SERVER_PORT					53703
 
 /* Test message configuration */
@@ -72,7 +72,6 @@ int main(void)
 	int bytes_sent;
 	int bytes_recvd;
 	struct net_if *iface;
-    struct in_addr *if_addr;
 	struct wifi_connect_req_params config = {0};
 	struct wifi_iface_status status = {0};
 	struct wifi_version version = {0};
@@ -81,7 +80,10 @@ int main(void)
 	uint32_t events;
 	char tx_msg[TX_MESSAGE_LEN_MAX];
 	char rx_msg[RX_MESSAGE_LEN_MAX];
-    char if_addr_s[NET_IPV4_ADDR_LEN];
+#if defined (CONFIG_ERPC_TRANSPORT_UART)
+	struct in_addr *if_addr;
+	char if_addr_s[NET_IPV4_ADDR_LEN];
+#endif
 
 	LOG_INF("Starting Wi-Fi station TCP client...");
 
@@ -129,9 +131,7 @@ int main(void)
 		}		
 	} while (1);
 
-#if defined (CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_MIKROBUS_SPI)
-	k_msleep(3000);
-#else
+#if defined (CONFIG_ERPC_TRANSPORT_UART)
 	do {
 		LOG_INF("Waiting for IP address to be assigned...");
 
@@ -144,6 +144,8 @@ int main(void)
 			k_msleep(1000);
 		}		
 	} while (if_addr == NULL);
+#else
+	k_msleep(3000);
 #endif
 
 	if (net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &status,
