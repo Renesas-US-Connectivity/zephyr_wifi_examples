@@ -61,23 +61,21 @@ following pins will be used):
 | P502 (RST) | RST_N (RST)       |
 +------------+-------------------+
 
-#. EK-RA6M4 + QCIOT-RRQ61051EVZ (MikroBUS SPI)
+#. EK-RA6M4 + EK-RA6W1 (SPI)
 
-Connect the QCIOT-RRQ61051EVZ to the MikroBUS interface on the EK-RA6M4 (the
-following pins will be used):
+To connect the EK-RA6M4 to the EK-RA6W1 using the SPI bus use jumper wires to
+connect the following pins:
 
 +-------------+-------------------+
-| EK-RA6M4    | QCIOT-RRQ61051EVZ |
+| EK-RA6M4    | EK-RA6W1          |
 +-------------+-------------------+
-| P204 (SCK)  | P0_09 (SCK)       |
+| P204 (SCK)  | P0_08 (SCK)       |
 +-------------+-------------------+
-| P205 (CS)   | P0_08 (CS)        |
+| P205 (CS)   | P0_09 (CS)        |
 +-------------+-------------------+
-| P203 (MOSI) | P0_05 (MOSI)      |
+| P203 (MOSI) | P0_11 (MOSI)      |
 +-------------+-------------------+
-| P202 (MISO) | P0_12 (MISO)      |
-+-------------+-------------------+
-| P408 (RDY)  | P0_06 (RDY)       |
+| P202 (MISO) | P0_10 (MISO)      |
 +-------------+-------------------+
 | P409 (INT)  | P0_07 (INT)       |
 +-------------+-------------------+
