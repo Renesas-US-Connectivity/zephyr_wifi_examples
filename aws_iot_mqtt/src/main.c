@@ -272,11 +272,11 @@ static void aws_client_setup(void)
 	client_ctx.transport.type = MQTT_TRANSPORT_SECURE;
 	struct mqtt_sec_config *const tls_config = &client_ctx.transport.tls.config;
 
-	tls_config->peer_verify = TLS_PEER_VERIFY_REQUIRED;
+	tls_config->peer_verify = TLS_PEER_VERIFY_OPTIONAL;
 	tls_config->cipher_list = NULL;
 	tls_config->sec_tag_list = sec_tls_tags;
 	tls_config->sec_tag_count = ARRAY_SIZE(sec_tls_tags);
-	tls_config->hostname = CONFIG_AWS_ENDPOINT;
+	tls_config->hostname = NULL;
 	tls_config->cert_nocopy = TLS_CERT_NOCOPY_NONE;
 #if (CONFIG_AWS_MQTT_PORT == 443 && !defined(CONFIG_MQTT_LIB_WEBSOCKET))
 	tls_config->alpn_protocol_name_list = alpn_list;
@@ -428,54 +428,25 @@ cleanup:
 	close(fds.fd);
 	fds.fd = -1;
 }
-
 static int resolve_broker_addr(struct sockaddr_in *broker)
 {
-	int ret;
-	struct addrinfo *ai = NULL;
+    memset(broker, 0, sizeof(*broker));
 
-	const struct addrinfo hints = {
-		.ai_family = AF_INET,
-		.ai_socktype = SOCK_STREAM,
-		.ai_protocol = 0,
-	};
-	char port_string[6] = {0};
+    broker->sin_family = AF_INET;
+    broker->sin_port = htons(8883);
 
-	sprintf(port_string, "%d", AWS_BROKER_PORT);
-	while (getaddrinfo(CONFIG_AWS_ENDPOINT, port_string, &hints, &ai)) {
-		LOG_ERR("failed to resolve hostname err = %d (errno = %d)", ret, errno);
-			k_msleep(2000);
-	}
-	
-		char addr_str[INET_ADDRSTRLEN];
+    inet_pton(AF_INET, "15.164.18.28", &broker->sin_addr);
 
-		memcpy(broker, ai->ai_addr, MIN(ai->ai_addrlen, sizeof(struct sockaddr_storage)));
-broker->sin_port = 8883;
-		inet_ntop(AF_INET, &broker->sin_addr, addr_str, sizeof(addr_str));
-		LOG_INF("Resolved: %s:%u", addr_str, htons(broker->sin_port));
-#if 0
-	ret = getaddrinfo(CONFIG_AWS_ENDPOINT, port_string, &hints, &ai);
-	if (ret == 0) {
-		char addr_str[INET_ADDRSTRLEN];
+    LOG_INF("Using hardcoded AWS IP: 15.164.18.28:8883");
 
-		memcpy(broker, ai->ai_addr, MIN(ai->ai_addrlen, sizeof(struct sockaddr_storage)));
-
-		inet_ntop(AF_INET, &broker->sin_addr, addr_str, sizeof(addr_str));
-		LOG_INF("Resolved: %s:%u", addr_str, htons(broker->sin_port));
-	} else {
-		LOG_ERR("failed to resolve hostname err = %d (errno = %d)", ret, errno);
-	}
-#endif
-	freeaddrinfo(ai);
-
-	return ret;
+    return 0;
 }
-
 /* Wi-Fi network configuration */
 /* Wi-Fi network configuration */
-#define WIFI_SSID				"TP-Link_1218"
-#define WIFI_PSK				"74512829"
-
+//#define WIFI_SSID				"TP-Link_1218"
+//#define WIFI_PSK				"74512829"
+#define WIFI_SSID				"ITP-FF"
+#define WIFI_PSK				"WiFiNetge@r@1"
 /* TCP server configuration */
 #define SERVER_IP					"192.168.31.224"
 #define SERVER_PORT					10001
