@@ -443,13 +443,8 @@ static int resolve_broker_addr(struct sockaddr_in *broker)
 }
 /* Wi-Fi network configuration */
 /* Wi-Fi network configuration */
-//#define WIFI_SSID				"TP-Link_1218"
-//#define WIFI_PSK				"74512829"
-#define WIFI_SSID				"ITP-FF"
-#define WIFI_PSK				"WiFiNetge@r@1"
-/* TCP server configuration */
-#define SERVER_IP					"192.168.31.224"
-#define SERVER_PORT					10001
+#define WIFI_SSID				"SSID"
+#define WIFI_PSK				"PASSWORD"
 
 /* Test message configuration */
 #define TX_MESSAGE_LEN_MAX			32
