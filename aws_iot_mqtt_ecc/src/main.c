@@ -9,6 +9,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <zephyr/net/socket.h>
 #include <zephyr/net/dns_resolve.h>
@@ -19,19 +20,16 @@
 #include <zephyr/logging/log.h>
 #include "net_sample_common.h"
 
-
-#include <stdio.h>
 #include <zephyr/kernel.h>
 #include <zephyr/net/wifi_mgmt.h>
-#include <zephyr/net/socket.h>
 #include <zephyr/net/net_if.h>
-
-#include <zephyr/logging/log.h>
-
+#include <wifi_host_to_ra_common.h>
+#include <c_wifi_host_to_ra_client.h>
 
 #if defined(CONFIG_MBEDTLS_MEMORY_DEBUG)
 #include <mbedtls/memory_buffer_alloc.h>
 #endif
+#define USE_WIFI_NETWORK_ADD 1
 
 LOG_MODULE_REGISTER(aws, LOG_LEVEL_DBG);
 
@@ -442,7 +440,7 @@ static int resolve_broker_addr(struct sockaddr_in *broker)
 	char port_string[6] = {0};
 	char addr_str[INET_ADDRSTRLEN];
 
-	sprintf(port_string, sizeof(port_string), "%d", AWS_BROKER_PORT);
+	snprintf(port_string, sizeof(port_string), "%d", AWS_BROKER_PORT);
 
 	LOG_INF("DNS resolve start");
 	LOG_INF("  Host : %s", CONFIG_AWS_ENDPOINT);
@@ -525,7 +523,7 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 	LOG_INF("Wi-Fi event - layer: %llx code: %llx cmd: %llx status: %d",
 		NET_MGMT_GET_LAYER(mgmt_event), NET_MGMT_GET_LAYER_CODE(mgmt_event),
 		NET_MGMT_GET_COMMAND(mgmt_event), status->status);
-	
+
 	switch (mgmt_event) {
 	case NET_EVENT_WIFI_CONNECT_RESULT:
 		if (status->status == 0) {
@@ -549,7 +547,7 @@ static void net_event_handler(struct net_mgmt_event_callback *cb,
 	LOG_INF("NET event - layer: %llx code: %llx cmd: %llx status: %d",
 		NET_MGMT_GET_LAYER(mgmt_event), NET_MGMT_GET_LAYER_CODE(mgmt_event),
 		NET_MGMT_GET_COMMAND(mgmt_event), status->status);
-	
+
 	switch (mgmt_event) {
 	case NET_EVENT_IPV4_ADDR_ADD:
 		k_event_set(&net_event, NET_EVENT_IPV4_ADDR_ADD);
@@ -569,7 +567,7 @@ static void dhcp_event_handler(struct net_mgmt_event_callback *cb,
 {
     if (mgmt_event == NET_EVENT_IPV4_DHCP_BOUND) {
         LOG_INF("DHCP bound - we have an IP address!");
-        
+
         // Get the assigned IP
         struct in_addr *addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
         if (addr) {
@@ -594,7 +592,7 @@ int main(void)
 	struct wifi_version version = {0};
 
 	uint32_t events;
-	
+
     	char if_addr_s[NET_IPV4_ADDR_LEN];
 
 	printk("AWS-MQTT TEST\n");
@@ -607,11 +605,11 @@ int main(void)
 	}
 
 	printk("iface found\n");
-	net_mgmt_init_event_callback(&cb, wifi_event_handler, 
+	net_mgmt_init_event_callback(&cb, wifi_event_handler,
 			NET_EVENT_WIFI_CONNECT_RESULT);
 	net_mgmt_add_event_callback(&cb);
 
-	net_mgmt_init_event_callback(&cb1, net_event_handler, 
+	net_mgmt_init_event_callback(&cb1, net_event_handler,
 			 NET_EVENT_IPV4_ADDR_ADD | NET_EVENT_IPV4_DHCP_BOUND);
 	net_mgmt_add_event_callback(&cb1);
 
@@ -622,33 +620,86 @@ int main(void)
 		LOG_INF("Wi-Fi Firmware Version: %s", version.fw_version);
 	}
 	printk("version get success\n");
-	
-	config.ssid = (const uint8_t *)WIFI_SSID;
-	config.ssid_length = strlen(WIFI_SSID);
-	config.psk = (const uint8_t *)WIFI_PSK;
-	config.psk_length = strlen(WIFI_PSK);
-	config.security = WIFI_SECURITY_TYPE_PSK;
-	config.channel = WIFI_CHANNEL_ANY;
-	config.band = WIFI_FREQ_BAND_2_4_GHZ;
+#if USE_WIFI_NETWORK_ADD
+    /* Profile-based Wi-Fi connection using BSSID - eRPC API */
+    WIFINetworkProfile_t profile = {0};
+    uint16_t profile_index = 0;
+    WIFIReturnCode_t wifi_ret;
 
+    /* Add network profile with BSSID support */
+    profile.ucSSIDLength = strlen(WIFI_SSID);
+    if (profile.ucSSIDLength > sizeof(profile.ucSSID) - 1) {
+        LOG_INF("SSID length exceeds maximum");
+        return 0;
+    }
+    memcpy(profile.ucSSID, (const uint8_t *)WIFI_SSID, profile.ucSSIDLength);
+
+    profile.ucPasswordLength = strlen(WIFI_PSK);
+    if (profile.ucPasswordLength > sizeof(profile.cPassword) - 1) {
+        LOG_INF("PSK length exceeds maximum");
+        return 0;
+    }
+    memcpy(profile.cPassword, (const uint8_t *)WIFI_PSK, profile.ucPasswordLength);
+
+    profile.xSecurity = eWiFiSecurityWPA2;
+
+    /* Set BSSID if available */
+    /* memcpy(profile.ucBSSID, bssid, sizeof(profile.ucBSSID)); */
+
+    LOG_INF("Adding network profile (SSID: %s)", WIFI_SSID);
+    wifi_ret = WIFI_NetworkAdd(&profile, &profile_index);
+    if (wifi_ret != eWiFiSuccess) {
+        LOG_INF("Failed to add network profile: %d", wifi_ret);
+        return 0;
+    }
+    LOG_INF("Network profile added with index: %u", profile_index);
+
+    /* Convert to valid wpa_supplicant profile index (0-2) */
+    uint16_t valid_profile_index = profile_index % 3;
+    LOG_INF("Using valid profile index: %u", valid_profile_index);
+
+    /* Scan for available networks */
+    LOG_INF("Scanning for available networks...");
+    WIFIScanResult_t scan_results[10] = {0};
+    wifi_ret = WIFI_Scan(scan_results, 10);
+    if (wifi_ret != eWiFiSuccess) {
+        LOG_INF("WiFi scan failed: %d", wifi_ret);
+    } else {
+        for (uint8_t i = 0; i < 10 && scan_results[i].ucSSIDLength > 0; i++) {
+            LOG_INF("Found network [%d]: SSID=%s, RSSI=%d, Channel=%d",
+                    i, (char *)scan_results[i].ucSSID,
+                    scan_results[i].cRSSI, scan_results[i].ucChannel);
+        }
+    }
+
+#else
+    /* Traditional Zephyr net_mgmt Wi-Fi connection */
+    config.ssid = (const uint8_t *)WIFI_SSID;
+    config.ssid_length = strlen(WIFI_SSID);
+    config.psk = (const uint8_t *)WIFI_PSK;
+    config.psk_length = strlen(WIFI_PSK);
+    config.security = WIFI_SECURITY_TYPE_PSK;
+    config.channel = WIFI_CHANNEL_ANY;
+    config.band = WIFI_FREQ_BAND_2_4_GHZ;
+
+    do {
+        LOG_INF("Connecting to network (SSID: %s)", config.ssid);
+
+        if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &config,
+                    sizeof(struct wifi_connect_req_params))) {
+            LOG_INF("Wi-Fi connect request failed");
+            return 0;
+        }
+
+        events = k_event_wait(&connect_event, WIFI_EVENT_ALL, true, K_FOREVER);
+        if (events == WIFI_EVENT_CONNECT_SUCCESS) {
+            LOG_INF("Joined network!");
+            break;
+        }
+    } while (1);
+#endif
 	do {
-		LOG_INF("Connecting to network (SSID: %s)", config.ssid);
-
-		if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &config,
-					sizeof(struct wifi_connect_req_params))) {
-			LOG_INF("Wi-Fi connect request failed");
-			return 0;
-		}
-
-		events = k_event_wait(&connect_event, WIFI_EVENT_ALL, true, K_FOREVER);	
-		if (events == WIFI_EVENT_CONNECT_SUCCESS) {
-			LOG_INF("Joined network!");
-			break;
-		}
-	} while (1);
-
-	do {
-		events = k_event_wait(&net_event, NET_EVENT_ALL, true, K_FOREVER);	
+		events = k_event_wait(&net_event, NET_EVENT_ALL, true, K_FOREVER);
 		if (events & NET_EVENT_IPV4_DHCP_BOUND) {
 			LOG_INF("DHCP lease received!\n");
 			break;
@@ -666,7 +717,7 @@ int main(void)
 			LOG_INF("Address: %s", if_addr_s);
 		} else {
 			k_msleep(1000);
-		}		
+		}
 	} while (if_addr == NULL);
 #else
 	k_msleep(3000);
