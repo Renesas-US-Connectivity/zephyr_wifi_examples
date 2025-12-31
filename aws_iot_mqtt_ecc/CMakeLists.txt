@@ -22,9 +22,4 @@ endif()
 
 target_sources(app PRIVATE "src/main.c" ${creds})
 
-# Add WiFi eRPC driver include path
-target_include_directories(app PRIVATE
-  ${ZEPHYR_BASE}/drivers/wifi/renesas/erpc_wifi/service
-)
-
 include(${ZEPHYR_BASE}/samples/net/common/common.cmake)

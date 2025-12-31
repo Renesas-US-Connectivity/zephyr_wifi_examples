@@ -23,13 +23,10 @@
 #include <zephyr/kernel.h>
 #include <zephyr/net/wifi_mgmt.h>
 #include <zephyr/net/net_if.h>
-#include <wifi_host_to_ra_common.h>
-#include <c_wifi_host_to_ra_client.h>
-
 #if defined(CONFIG_MBEDTLS_MEMORY_DEBUG)
 #include <mbedtls/memory_buffer_alloc.h>
 #endif
-#define USE_WIFI_NETWORK_ADD 1
+#define USE_WIFI_BSSID_MATCHING 1
 
 LOG_MODULE_REGISTER(aws, LOG_LEVEL_DBG);
 
@@ -488,9 +485,9 @@ static int resolve_broker_addr(struct sockaddr_in *broker)
 }
 
 /* Wi-Fi network configuration */
-/* Wi-Fi network configuration */
 #define WIFI_SSID				"ITP-FF"
 #define WIFI_PSK				"WiFiNetge@r@1"
+#define WIFI_BSSID				"80:cc:9c:51:3f:a3"
 /* TCP server configuration */
 #define SERVER_IP					"192.168.31.224"
 #define SERVER_PORT					10001
@@ -506,21 +503,30 @@ static int resolve_broker_addr(struct sockaddr_in *broker)
 									 WIFI_EVENT_CONNECT_FAILED)
 #define NET_EVENT_ALL				(NET_EVENT_IPV4_ADDR_ADD | \
 									 NET_EVENT_IPV4_DHCP_BOUND)
+#define SCAN_EVENT_DONE			BIT(2)
+#define SCAN_EVENT_BSSID_FOUND		BIT(3)
+
+/* Scan result tracking */
+static bool bssid_match_found = false;
+static struct wifi_scan_result matched_ap = {0};
+static uint8_t target_bssid[WIFI_MAC_ADDR_LEN] = {0};
 
 static void print_wifi_status(struct wifi_iface_status *status);
 
 static struct net_mgmt_event_callback cb;
 static struct net_mgmt_event_callback cb1;
+static struct net_mgmt_event_callback scan_cb;
 
 K_EVENT_DEFINE(connect_event);
 K_EVENT_DEFINE(net_event);
+K_EVENT_DEFINE(scan_event);
 
 static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 				   uint64_t mgmt_event, struct net_if *iface)
 {
 	const struct wifi_status *status = (const struct wifi_status *)cb->info;
 
-	LOG_INF("Wi-Fi event - layer: %llx code: %llx cmd: %llx status: %d",
+	LOG_INF("Wi-Fi event received - layer: %llx code: %llx cmd: %llx status: %d",
 		NET_MGMT_GET_LAYER(mgmt_event), NET_MGMT_GET_LAYER_CODE(mgmt_event),
 		NET_MGMT_GET_COMMAND(mgmt_event), status->status);
 
@@ -544,7 +550,7 @@ static void net_event_handler(struct net_mgmt_event_callback *cb,
 {
 	const struct wifi_status *status = (const struct wifi_status *)cb->info;
 
-	LOG_INF("NET event - layer: %llx code: %llx cmd: %llx status: %d",
+	LOG_INF("NET event received - layer: %llx code: %llx cmd: %llx status: %d",
 		NET_MGMT_GET_LAYER(mgmt_event), NET_MGMT_GET_LAYER_CODE(mgmt_event),
 		NET_MGMT_GET_COMMAND(mgmt_event), status->status);
 
@@ -579,6 +585,30 @@ static void dhcp_event_handler(struct net_mgmt_event_callback *cb,
     }
 }
 
+static void wifi_scan_result_handler(struct net_mgmt_event_callback *cb,
+                                     uint64_t mgmt_event, struct net_if *iface)
+{
+	const struct wifi_scan_result *scan_result =
+		(const struct wifi_scan_result *)cb->info;
+
+	if (mgmt_event == NET_EVENT_WIFI_SCAN_RESULT) {
+		/* Check if this result matches our target BSSID */
+		if (memcmp(target_bssid, scan_result->mac, WIFI_MAC_ADDR_LEN) == 0) {
+			if (!bssid_match_found) {
+				bssid_match_found = true;
+				memcpy(&matched_ap, scan_result, sizeof(struct wifi_scan_result));
+				/* Signal that BSSID was found - exit scan wait loop */
+				k_event_set(&scan_event, SCAN_EVENT_BSSID_FOUND);
+			}
+		}
+	} else if (mgmt_event == NET_EVENT_WIFI_SCAN_DONE) {
+		/* Only signal scan done if BSSID not already found */
+		if (!bssid_match_found) {
+			k_event_set(&scan_event, SCAN_EVENT_DONE);
+		}
+	}
+}
+
 extern int connect_to_broker(void);
 int main(void)
 {
@@ -608,10 +638,12 @@ int main(void)
 	net_mgmt_init_event_callback(&cb, wifi_event_handler,
 			NET_EVENT_WIFI_CONNECT_RESULT);
 	net_mgmt_add_event_callback(&cb);
-
 	net_mgmt_init_event_callback(&cb1, net_event_handler,
 			 NET_EVENT_IPV4_ADDR_ADD | NET_EVENT_IPV4_DHCP_BOUND);
 	net_mgmt_add_event_callback(&cb1);
+	net_mgmt_init_event_callback(&scan_cb, wifi_scan_result_handler,
+			NET_EVENT_WIFI_SCAN_RESULT | NET_EVENT_WIFI_SCAN_DONE);
+	net_mgmt_add_event_callback(&scan_cb);
 
 	printk("callback registered\n");
 	if (net_mgmt(NET_REQUEST_WIFI_VERSION, iface, &version,
@@ -620,88 +652,80 @@ int main(void)
 		LOG_INF("Wi-Fi Firmware Version: %s", version.fw_version);
 	}
 	printk("version get success\n");
-#if USE_WIFI_NETWORK_ADD
-    /* Profile-based Wi-Fi connection using BSSID - eRPC API */
-    WIFINetworkProfile_t profile = {0};
-    uint16_t profile_index = 0;
-    WIFIReturnCode_t wifi_ret;
-
-    /* Add network profile with BSSID support */
-    profile.ucSSIDLength = strlen(WIFI_SSID);
-    if (profile.ucSSIDLength > sizeof(profile.ucSSID) - 1) {
-        LOG_INF("SSID length exceeds maximum");
-        return 0;
-    }
-    memcpy(profile.ucSSID, (const uint8_t *)WIFI_SSID, profile.ucSSIDLength);
-
-    profile.ucPasswordLength = strlen(WIFI_PSK);
-    if (profile.ucPasswordLength > sizeof(profile.cPassword) - 1) {
-        LOG_INF("PSK length exceeds maximum");
-        return 0;
-    }
-    memcpy(profile.cPassword, (const uint8_t *)WIFI_PSK, profile.ucPasswordLength);
-
-    profile.xSecurity = eWiFiSecurityWPA2;
-
-    /* Set BSSID if available */
-    /* memcpy(profile.ucBSSID, bssid, sizeof(profile.ucBSSID)); */
-
-    LOG_INF("Adding network profile (SSID: %s)", WIFI_SSID);
-    wifi_ret = WIFI_NetworkAdd(&profile, &profile_index);
-    if (wifi_ret != eWiFiSuccess) {
-        LOG_INF("Failed to add network profile: %d", wifi_ret);
-        return 0;
-    }
-    LOG_INF("Network profile added with index: %u", profile_index);
-
-    /* Convert to valid wpa_supplicant profile index (0-2) */
-    uint16_t valid_profile_index = profile_index % 3;
-    LOG_INF("Using valid profile index: %u", valid_profile_index);
-
-    /* Scan for available networks */
-    LOG_INF("Scanning for available networks...");
-    WIFIScanResult_t scan_results[10] = {0};
-    wifi_ret = WIFI_Scan(scan_results, 10);
-    if (wifi_ret != eWiFiSuccess) {
-        LOG_INF("WiFi scan failed: %d", wifi_ret);
-    } else {
-        for (uint8_t i = 0; i < 10 && scan_results[i].ucSSIDLength > 0; i++) {
-            LOG_INF("Found network [%d]: SSID=%s, RSSI=%d, Channel=%d",
-                    i, (char *)scan_results[i].ucSSID,
-                    scan_results[i].cRSSI, scan_results[i].ucChannel);
-        }
-    }
-
-#else
-    /* Traditional Zephyr net_mgmt Wi-Fi connection */
+    /* Prepare connection config */
     config.ssid = (const uint8_t *)WIFI_SSID;
     config.ssid_length = strlen(WIFI_SSID);
     config.psk = (const uint8_t *)WIFI_PSK;
     config.psk_length = strlen(WIFI_PSK);
     config.security = WIFI_SECURITY_TYPE_PSK;
-    config.channel = WIFI_CHANNEL_ANY;
     config.band = WIFI_FREQ_BAND_2_4_GHZ;
 
-    do {
-        LOG_INF("Connecting to network (SSID: %s)", config.ssid);
+#if USE_WIFI_BSSID_MATCHING
+    /* Parse BSSID from string for matching during scan */
+    uint8_t configured_bssid[WIFI_MAC_ADDR_LEN];
+    sscanf(WIFI_BSSID, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+           &configured_bssid[0], &configured_bssid[1], &configured_bssid[2],
+           &configured_bssid[3], &configured_bssid[4], &configured_bssid[5]);
 
-        if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &config,
-                    sizeof(struct wifi_connect_req_params))) {
-            LOG_INF("Wi-Fi connect request failed");
+    /* Scan for available networks via net_mgmt */
+    /* Reset scan results before scanning */
+    bssid_match_found = false;
+    /* Store target BSSID for matching during scan */
+    memcpy(target_bssid, configured_bssid, sizeof(target_bssid));
+
+    struct wifi_scan_params scan_params = {0};
+    scan_params.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+
+    if (net_mgmt(NET_REQUEST_WIFI_SCAN, iface, &scan_params,
+                sizeof(struct wifi_scan_params))) {
+        LOG_INF("Wi-Fi scan request failed");
+        return 0;
+    }
+
+    /* Wait for BSSID to be found during scan or scan to complete */
+    events = k_event_wait(&scan_event,
+                          SCAN_EVENT_BSSID_FOUND | SCAN_EVENT_DONE,
+                          true, K_SECONDS(10));
+
+    if (events & SCAN_EVENT_BSSID_FOUND) {
+        /* BSSID found - proceed immediately with connection */
+        LOG_INF("BSSID found during scan - connecting immediately");
+    } else if (events & SCAN_EVENT_DONE) {
+        /* Scan completed but BSSID not found */
+        if (!bssid_match_found) {
+            LOG_INF("BSSID not found in scan results");
             return 0;
         }
+    } else {
+        /* Timeout */
+        LOG_INF("Scan timeout");
+        return 0;
+    }
 
-        events = k_event_wait(&connect_event, WIFI_EVENT_ALL, true, K_FOREVER);
-        if (events == WIFI_EVENT_CONNECT_SUCCESS) {
-            LOG_INF("Joined network!");
-            break;
-        }
-    } while (1);
+    /* Use channel and BSSID from matched AP */
+    config.channel = matched_ap.channel;
+    memcpy(config.bssid, matched_ap.mac, WIFI_MAC_ADDR_LEN);
+#else
+    /* Use default channel without BSSID matching */
+    config.channel = WIFI_CHANNEL_ANY;
 #endif
+
+    if (net_mgmt(NET_REQUEST_WIFI_CONNECT, iface, &config,
+                sizeof(struct wifi_connect_req_params))) {
+        LOG_INF("Wi-Fi connect request failed");
+        return 0;
+    }
+    /* Wait for connection result */
+    events = k_event_wait(&connect_event, WIFI_EVENT_ALL, true, K_FOREVER);
+    if (events != WIFI_EVENT_CONNECT_SUCCESS) {
+        return 0;
+    }
+
+	/* Wait for DHCP to get IP address */
 	do {
 		events = k_event_wait(&net_event, NET_EVENT_ALL, true, K_FOREVER);
 		if (events & NET_EVENT_IPV4_DHCP_BOUND) {
-			LOG_INF("DHCP lease received!\n");
+			LOG_INF("DHCP lease received!");
 			break;
 		}
 	} while (1);
