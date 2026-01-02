@@ -257,11 +257,11 @@ static int https_client_connect_and_request(struct net_if *iface)
 
 	LOG_INF("HTTPS connection established");
 
-	/* Prepare HTTP GET request */
+	/* Send HTTP GET request */
 	snprintf(request_buffer, sizeof(request_buffer),
 		 "GET %s HTTP/1.1\r\n"
 		 "Host: %s\r\n"
-		 "Connection: close\r\n"
+		 "Connection: keep-alive\r\n"
 		 "User-Agent: Zephyr-HTTPS-Client/1.0\r\n"
 		 "\r\n",
 		 HTTPS_PATH, HTTPS_SERVER);
@@ -290,6 +290,41 @@ static int https_client_connect_and_request(struct net_if *iface)
 	LOG_INF("Response received (%d bytes)", bytes_recv);
 	LOG_INF("Response:");
 	LOG_INF("%s", response_buffer);
+
+	/* Keep connection alive and send periodic keep-alive pings */
+	LOG_INF("Connection established - Sending keep-alive pings every 5 seconds");
+	int ping_count = 0;
+
+	for (;;) {
+		k_sleep(K_SECONDS(5));
+
+		/* Send keep-alive ping (HTTP HEAD request) */
+		ping_count++;
+		snprintf(request_buffer, sizeof(request_buffer),
+			 "HEAD %s HTTP/1.1\r\n"
+			 "Host: %s\r\n"
+			 "Connection: keep-alive\r\n"
+			 "User-Agent: Zephyr-HTTPS-Client/1.0\r\n"
+			 "\r\n",
+			 HTTPS_PATH, HTTPS_SERVER);
+
+		bytes_sent = zsock_send(sock, request_buffer, strlen(request_buffer), 0);
+		if (bytes_sent < 0) {
+			LOG_WRN("Keep-alive ping #%d failed: %d", ping_count, bytes_sent);
+			break;
+		}
+
+		/* Receive keep-alive response */
+		memset(response_buffer, 0, sizeof(response_buffer));
+		bytes_recv = zsock_recv(sock, response_buffer, sizeof(response_buffer) - 1, 0);
+		if (bytes_recv < 0) {
+			LOG_WRN("Keep-alive response #%d failed: %d", ping_count, bytes_recv);
+			break;
+		}
+
+		LOG_INF("Keep-alive ping #%d - Server ACK received (%d bytes)", ping_count, bytes_recv);
+		LOG_INF("Client and Server are ALIVE");
+	}
 
 	/* Close connection */
 	zsock_close(sock);
@@ -433,21 +468,15 @@ int main(void)
 
 	LOG_INF("Credentials setup completed");
 
-	/* Start HTTPS client application */
+	/* Start HTTPS client application with keep-alive pings */
 	LOG_INF("Starting HTTPS client application...");
 	ret = https_client_connect_and_request(iface);
 	if (ret < 0) {
 		LOG_ERR("HTTPS client failed: %d", ret);
 		return ret;
-	} else {
-		LOG_INF("HTTPS client completed successfully");
 	}
 
-	/* Application completed successfully */
-	LOG_INF("Application finished, entering idle loop");
-	for (;;) {
-		k_sleep(K_SECONDS(10));
-	}
-
+	/* Application completed */
+	LOG_INF("Application finished");
 	return 0;
 }
