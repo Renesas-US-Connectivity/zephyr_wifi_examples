@@ -1,0 +1,37 @@
+#
+# Copyright (c) 2023 Lucas Dietrich <ld.adecy@gmail.com>
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+menu "HTTPS/TLS Client"
+mainmenu "HTTPS/TLS Client Application"
+
+config HTTPS_SERVER
+	string "HTTPS server hostname"
+	default "httpbin.org"
+	help
+	  Hostname of the HTTPS server to connect to.
+
+config HTTPS_PORT
+	int "HTTPS port"
+	default 443
+	help
+	  Port number of the HTTPS server (default 443).
+
+config HTTPS_PATH
+	string "HTTPS request path"
+	default "/get"
+	help
+	  HTTP path to request from the HTTPS server.
+
+config TLS_HTTPS_ENABLED
+	bool "Enable HTTPS/TLS client"
+	default y
+	help
+	  Enable HTTPS/TLS client functionality.
+
+endmenu
+
+source "samples/net/common/Kconfig"
+source "Kconfig.zephyr"
