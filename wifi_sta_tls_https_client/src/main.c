@@ -70,6 +70,9 @@ static int setup_credentials(void)
 static bool bssid_match_found = false;
 static struct wifi_scan_result matched_ap = {0};
 static uint8_t target_bssid[WIFI_MAC_ADDR_LEN] = {0};
+static char configured_ssid[33] = {0};  /* Max SSID length is 32 + null terminator */
+static uint8_t configured_ssid_len = 0;
+static enum wifi_security_type configured_security = WIFI_SECURITY_TYPE_UNKNOWN;
 
 static struct net_mgmt_event_callback cb;
 static struct net_mgmt_event_callback cb1;
@@ -137,18 +140,52 @@ static void wifi_scan_result_handler(struct net_mgmt_event_callback *cb,
 		(const struct wifi_scan_result *)cb->info;
 
 	if (mgmt_event == NET_EVENT_WIFI_SCAN_RESULT) {
-		/* Check if this result matches our target BSSID */
-		if (memcmp(target_bssid, scan_result->mac, WIFI_MAC_ADDR_LEN) == 0) {
-			if (!bssid_match_found) {
-				bssid_match_found = true;
-				memcpy(&matched_ap, scan_result, sizeof(struct wifi_scan_result));
-				/* Signal that BSSID was found - exit scan wait loop */
-				k_event_set(&scan_event, SCAN_EVENT_BSSID_FOUND);
+		/* First check BSSID */
+		bool bssid_matches = (memcmp(target_bssid, scan_result->mac, WIFI_MAC_ADDR_LEN) == 0);
+		if (bssid_matches) {
+			/* Log current scan result only if BSSID matches */
+			LOG_INF("Scan result - SSID: %.*s, BSSID: %02x:%02x:%02x:%02x:%02x:%02x, Channel: %d, Security: %d",
+				scan_result->ssid_length, (const char *)scan_result->ssid,
+				scan_result->mac[0], scan_result->mac[1], scan_result->mac[2],
+				scan_result->mac[3], scan_result->mac[4], scan_result->mac[5],
+				scan_result->channel, scan_result->security);
+
+			/* Only check SSID if BSSID matches */
+			bool ssid_matches = (scan_result->ssid_length == configured_ssid_len &&
+					     memcmp(configured_ssid, (const char *)scan_result->ssid,
+					     configured_ssid_len) == 0);
+
+			/* Check security type */
+			bool security_matches = (scan_result->security == configured_security);
+
+			if (ssid_matches && security_matches) {
+				if (!bssid_match_found) {
+					bssid_match_found = true;
+					memcpy(&matched_ap, scan_result, sizeof(struct wifi_scan_result));
+					LOG_INF("SUCCESS: BSSID, SSID, and Security Type MATCHED - Target AP found!");
+					/* Signal that target AP was found - exit scan wait loop */
+					k_event_set(&scan_event, SCAN_EVENT_BSSID_FOUND);
+				}
+			} else {
+				if (!ssid_matches) {
+					LOG_WRN("BSSID matched but SSID NOT matched!");
+					LOG_WRN("  Configured SSID: %.*s (%d bytes)",
+						configured_ssid_len, configured_ssid, configured_ssid_len);
+					LOG_WRN("  Scanned SSID: %.*s (%d bytes)",
+						scan_result->ssid_length, (const char *)scan_result->ssid,
+						scan_result->ssid_length);
+				}
+				if (!security_matches) {
+					LOG_WRN("BSSID and SSID matched but Security Type NOT matched!");
+					LOG_WRN("  Configured Security: %d", configured_security);
+					LOG_WRN("  Scanned Security: %d", scan_result->security);
+				}
 			}
 		}
 	} else if (mgmt_event == NET_EVENT_WIFI_SCAN_DONE) {
-		/* Only signal scan done if BSSID not already found */
+		/* Log summary after scan is done */
 		if (!bssid_match_found) {
+			LOG_WRN("Scan completed: BSSID did not match - Target AP not found");
 			k_event_set(&scan_event, SCAN_EVENT_DONE);
 		}
 	}
@@ -388,12 +425,26 @@ int main(void)
 	config.security = WIFI_SECURITY_TYPE_PSK;
 	config.band = WIFI_FREQ_BAND_2_4_GHZ;
 
+	/* Store configured security type for validation */
+	configured_security = config.security;
+
 #if USE_WIFI_BSSID_MATCHING
 	/* Parse BSSID from string for matching during scan */
 	uint8_t configured_bssid[WIFI_MAC_ADDR_LEN];
 	sscanf(WIFI_BSSID, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
 	       &configured_bssid[0], &configured_bssid[1], &configured_bssid[2],
 	       &configured_bssid[3], &configured_bssid[4], &configured_bssid[5]);
+
+	/* Store configured SSID for validation during scan */
+	configured_ssid_len = strlen(WIFI_SSID);
+	if (configured_ssid_len > 32) {
+		LOG_ERR("Configured SSID too long: %d bytes (max 32)", configured_ssid_len);
+		return 0;
+	}
+	strncpy(configured_ssid, WIFI_SSID, sizeof(configured_ssid) - 1);
+	configured_ssid[32] = '\0';
+
+	LOG_INF("WiFi Configuration - SSID: %s, BSSID: %s, Security: %d", WIFI_SSID, WIFI_BSSID, configured_security);
 
 	/* Scan for available networks via net_mgmt */
 	/* Reset scan results before scanning */
@@ -410,29 +461,42 @@ int main(void)
 		return 0;
 	}
 
-	/* Wait for BSSID to be found during scan or scan to complete */
+	/* Wait for target AP to be found during scan or scan to complete */
 	events = k_event_wait(&scan_event,
 	                       SCAN_EVENT_BSSID_FOUND | SCAN_EVENT_DONE,
 	                       true, K_SECONDS(10));
 
 	if (events & SCAN_EVENT_BSSID_FOUND) {
-		/* BSSID found - proceed immediately with connection */
-		LOG_INF("BSSID found during scan - connecting immediately");
+		/* Target AP found (BSSID and SSID both matched) - proceed with connection */
+		LOG_INF("Target AP found during scan (BSSID and SSID matched) - connecting now");
 	} else if (events & SCAN_EVENT_DONE) {
-		/* Scan completed but BSSID not found */
+		/* Scan completed but target AP not found */
 		if (!bssid_match_found) {
-			LOG_INF("BSSID not found in scan results");
-			return 0;
+		LOG_ERR("ERROR: Target AP not found in scan results!");
+		LOG_ERR("  Expected SSID: %s", WIFI_SSID);
+		LOG_ERR("  Expected BSSID: %s", WIFI_BSSID);
+		LOG_ERR("  Expected Security: %d", configured_security);
+		LOG_ERR("Aborting connection attempt");
+		return 0;
 		}
 	} else {
 		/* Timeout */
-		LOG_INF("Scan timeout");
+		LOG_ERR("Scan timeout - Target AP not found within timeout period");
+		return 0;
+	}
+
+	/* Final validation before connecting */
+	if (!bssid_match_found) {
+		LOG_ERR("CRITICAL ERROR: Target AP validation failed before connection!");
+		LOG_ERR("Refusing to connect to mismatched network");
 		return 0;
 	}
 
 	/* Use channel and BSSID from matched AP */
 	config.channel = matched_ap.channel;
 	memcpy(config.bssid, matched_ap.mac, WIFI_MAC_ADDR_LEN);
+
+	LOG_INF("Connection parameters verified - attempting WiFi connection");
 #else
 	/* Use default channel without BSSID matching */
 	config.channel = WIFI_CHANNEL_ANY;
