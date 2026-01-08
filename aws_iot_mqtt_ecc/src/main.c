@@ -66,43 +66,43 @@ static const char * const alpn_list[] = {"x-amzn-mqtt-ca"};
 #endif
 
 #define TLS_TAG_DEVICE_CERTIFICATE 1
-#define TLS_TAG_DEVICE_PRIVATE_KEY 1
 #define TLS_TAG_AWS_CA_CERTIFICATE 2
 
 static const sec_tag_t sec_tls_tags[] = {
-	TLS_TAG_DEVICE_CERTIFICATE,
-	TLS_TAG_AWS_CA_CERTIFICATE,
+    TLS_TAG_DEVICE_CERTIFICATE,
+    TLS_TAG_AWS_CA_CERTIFICATE,
 };
 
 static int setup_credentials(void)
 {
-	int ret;
+    int ret;
 
-	ret = tls_credential_add(TLS_TAG_DEVICE_CERTIFICATE, TLS_CREDENTIAL_SERVER_CERTIFICATE,
-				 public_cert, public_cert_len);
-	if (ret < 0) {
-		LOG_ERR("Failed to add device certificate: %d", ret);
-		goto exit;
-	}
+    ret = tls_credential_add(TLS_TAG_DEVICE_CERTIFICATE,
+                             TLS_CREDENTIAL_SERVER_CERTIFICATE,
+                             public_cert, public_cert_len);
+    if (ret < 0) {
+        LOG_ERR("Failed to add device certificate: %d", ret);
+        return ret;
+    }
 
-	ret = tls_credential_add(TLS_TAG_DEVICE_PRIVATE_KEY, TLS_CREDENTIAL_PRIVATE_KEY,
-				 private_key, private_key_len);
-	if (ret < 0) {
-		LOG_ERR("Failed to add device private key: %d", ret);
-		goto exit;
-	}
+    ret = tls_credential_add(TLS_TAG_DEVICE_CERTIFICATE,
+                             TLS_CREDENTIAL_PRIVATE_KEY,
+                             private_key, private_key_len);
+    if (ret < 0) {
+        LOG_ERR("Failed to add device private key: %d", ret);
+        return ret;
+    }
 
-	ret = tls_credential_add(TLS_TAG_AWS_CA_CERTIFICATE, TLS_CREDENTIAL_CA_CERTIFICATE, ca_cert,
-				 ca_cert_len);
-	if (ret < 0) {
-		LOG_ERR("Failed to add device private key: %d", ret);
-		goto exit;
-	}
+    ret = tls_credential_add(TLS_TAG_AWS_CA_CERTIFICATE,
+                             TLS_CREDENTIAL_CA_CERTIFICATE,
+                             ca_cert, ca_cert_len);
+    if (ret < 0) {
+        LOG_ERR("Failed to add CA certificate: %d", ret);
+        return ret;
+    }
 
-exit:
-	return ret;
+    return 0;
 }
-
 static int subscribe_topic(void)
 {
 	int ret;
@@ -276,7 +276,7 @@ static void aws_client_setup(void)
 	tls_config->cipher_list = NULL;
 	tls_config->sec_tag_list = sec_tls_tags;
 	tls_config->sec_tag_count = ARRAY_SIZE(sec_tls_tags);
-	tls_config->hostname = NULL;
+	tls_config->hostname = CONFIG_AWS_ENDPOINT;
 	tls_config->cert_nocopy = TLS_CERT_NOCOPY_NONE;
 #if (CONFIG_AWS_MQTT_PORT == 443 && !defined(CONFIG_MQTT_LIB_WEBSOCKET))
 	tls_config->alpn_protocol_name_list = alpn_list;
@@ -428,19 +428,67 @@ cleanup:
 	close(fds.fd);
 	fds.fd = -1;
 }
+
 static int resolve_broker_addr(struct sockaddr_in *broker)
 {
-    memset(broker, 0, sizeof(*broker));
+	int ret;
+	struct addrinfo *ai = NULL;
 
-    broker->sin_family = AF_INET;
-    broker->sin_port = htons(8883);
+	const struct addrinfo hints = {
+		.ai_family = AF_INET,
+		.ai_socktype = SOCK_STREAM,
+		.ai_protocol = 0,
+	};
+	char port_string[6] = {0};
+	char addr_str[INET_ADDRSTRLEN];
 
-    inet_pton(AF_INET, "15.164.18.28", &broker->sin_addr);
+	sprintf(port_string, sizeof(port_string), "%d", AWS_BROKER_PORT);
 
-    LOG_INF("Using hardcoded AWS IP: 15.164.18.28:8883");
+	LOG_INF("DNS resolve start");
+	LOG_INF("  Host : %s", CONFIG_AWS_ENDPOINT);
+	LOG_INF("  Port : %s", port_string);
 
-    return 0;
+	do {
+		ret = getaddrinfo(CONFIG_AWS_ENDPOINT, port_string, &hints, &ai);
+
+		if (ret != 0) {
+			LOG_ERR("getaddrinfo() failed");
+			LOG_ERR("  ret        = %d", ret);
+			LOG_ERR("  gai_strerr = %s", gai_strerror(ret));
+			LOG_ERR("  errno      = %d", errno);
+
+			k_msleep(2000);
+		}
+	}while (ret != 0);
+
+	LOG_INF("DNS resolve success");
+
+	memcpy(broker, ai->ai_addr, MIN(ai->ai_addrlen, sizeof(struct sockaddr_storage)));
+    broker->sin_port = htons(AWS_BROKER_PORT);
+	inet_ntop(AF_INET, &broker->sin_addr, addr_str, sizeof(addr_str));
+
+	LOG_INF("Resolved broker address: %s:%u", addr_str, AWS_BROKER_PORT);
+
+	freeaddrinfo(ai);
+
+	return ret;
+
+
+
+	/*hard-coded DNS IP*/
+// 	 memset(broker, 0, sizeof(*broker));
+
+//     broker->sin_family = AF_INET;
+//     broker->sin_port = htons(8883);
+
+//     inet_pton(AF_INET, "15.164.18.28", &broker->sin_addr);
+
+// 	LOG_INF("Using hardcoded AWS IP: 15.164.18.28:8883");
+
+// return 0;
+
 }
+
 /* Wi-Fi network configuration */
 /* Wi-Fi network configuration */
 #define WIFI_SSID				"SSID"
