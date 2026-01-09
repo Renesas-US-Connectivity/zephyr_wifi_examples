@@ -8,15 +8,25 @@ LOG_MODULE_REGISTER(mqtt_test, LOG_LEVEL_DBG);
 
 #define MQTT_CLIENTID "--->>> zephyr MQTT client <<<---"
 //#define MQTT_BROKER_ADDR "3.122.182.249"
+
+#if 0
 #define MQTT_BROKER_ADDR "192.168.31.224"
 #define MQTT_BROKER_PORT 1884
+#endif
 
+#if 1
+#define MQTT_BROKER_ADDR "192.168.28.165"
+#define MQTT_BROKER_PORT 1884
+#endif
 
 
 static struct mqtt_client client;
 static struct sockaddr_storage broker;
 static uint8_t rx_buffer[256];
 static uint8_t tx_buffer[256];
+
+static atomic_t mqtt_connected = ATOMIC_INIT(0);
+static atomic_t mqtt_reconnect_req = ATOMIC_INIT(0);
 
 static bool can_publish = false;
 
@@ -37,6 +47,11 @@ static void mqtt_publish_data(void)
 	const uint8_t *topic_str = "zephyr/mqtt/test/data";
 	struct mqtt_publish_param param = { 0 };
 	uint8_t data[] = "The quick brown fox jumps over the lazy dog.";
+
+	if (!atomic_get(&mqtt_connected)) {
+    LOG_ERR("MQTT not connected");
+    return;
+    }
 
 	if (!can_publish) {
 		LOG_ERR("Can't publish yet");
@@ -127,6 +142,9 @@ static void mqtt_evt_handler(struct mqtt_client *const c,
         if (evt->result == 0) {
 
             LOG_INF("TEST MQTT connected\n");
+			
+            atomic_set(&mqtt_connected, 1);
+            atomic_clear(&mqtt_reconnect_req);
 
         	int type;
         	socklen_t len = sizeof(type);
@@ -150,10 +168,13 @@ static void mqtt_evt_handler(struct mqtt_client *const c,
 
         } else {
         	LOG_INF("MQTT connect failed (%d)\n", evt->result);
+			atomic_set(&mqtt_reconnect_req, 1);
         }
         break;
     case MQTT_EVT_DISCONNECT:
     	LOG_INF("TEST MQTT disconnected\n");
+		atomic_clear(&mqtt_connected);
+        atomic_set(&mqtt_reconnect_req, 1);
     	can_publish = false;
         break;
     case MQTT_EVT_SUBACK:
@@ -183,6 +204,44 @@ static void mqtt_comm_thread(void *arg1, void *arg2, void *arg3)
 
 	for (;;) {
 
+		while (atomic_get(&mqtt_reconnect_req)) {
+		LOG_INF("MQTT reconnect attempt");
+
+		if (client->transport.tcp.sock > 0) {
+			zsock_close(client->transport.tcp.sock);
+			client->transport.tcp.sock = -1;
+		}
+		k_sleep(K_MSEC(500)); 
+
+		
+		//  mqtt_client_init(client);
+		// client->broker = &broker;
+		// client->evt_cb = mqtt_evt_handler;
+		// client->client_id.utf8 = (uint8_t *)MQTT_CLIENTID;
+		// client->client_id.size = strlen(MQTT_CLIENTID);
+		// client->keepalive = 1000;
+		// client->protocol_version = MQTT_VERSION_3_1_1;
+		// client->rx_buf = rx_buffer;
+		// client->rx_buf_size = sizeof(rx_buffer);
+		// client->tx_buf = tx_buffer;
+		// client->tx_buf_size = sizeof(tx_buffer);
+		// client->transport.type = MQTT_TRANSPORT_NON_SECURE;
+
+		// int ret = mqtt_connect(client);
+		// if (ret) {
+		// 	LOG_ERR("MQTT reconnect failed: %d (%s)", ret, strerror(-ret));
+		// 	k_sleep(K_SECONDS(3));
+		// 	continue;
+		// }
+
+		connect_to_broker();
+
+		LOG_INF("MQTT reconnect sent");
+		k_sleep(K_SECONDS(1));
+		}
+	
+
+
 		fds.fd = client->transport.tcp.sock;
 		fds.events = ZSOCK_POLLIN;
 		fds.revents = 0;
@@ -197,9 +256,16 @@ static void mqtt_comm_thread(void *arg1, void *arg2, void *arg3)
 		rc = zsock_poll(&fds, 1, -1);
 		switch (rc) {
 		case 1:
+			// if (fds.revents & ZSOCK_POLLNVAL) {
+			// 	LOG_INF("Socked %d closed", fds.fd);
+			// 	return;
+			// }
+
 			if (fds.revents & ZSOCK_POLLNVAL) {
-				LOG_INF("Socked %d closed", fds.fd);
-				return;
+    		LOG_ERR("Socket invalid, scheduling reconnect");
+    		atomic_set(&mqtt_reconnect_req, 1);
+    		k_sleep(K_SECONDS(1));
+    		continue;
 			}
 
 			if (fds.revents & ZSOCK_POLLERR) {
@@ -272,6 +338,7 @@ int connect_to_broker(void)
 
 	LOG_ERR("TEST MQTT CONNECTED (sock: %d): %d (%s)", client.transport.tcp.sock, ret, strerror(-ret));
 
+	atomic_clear(&mqtt_reconnect_req);
 	return 0;
 }
 
