@@ -70,7 +70,7 @@ void disable_ps_mode() {
 
   gpio_trigger_wakeup(g_gpio_wakeup_dev);
   /* wait for device to wake up*/
-  k_sleep(K_SECONDS(20));
+  k_sleep(K_SECONDS(15));
 }
 
 static void mqtt_publish_data(void) {

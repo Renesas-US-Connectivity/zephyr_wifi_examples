@@ -387,6 +387,11 @@ static const struct json_obj_descr json_descr[] = {
 
 static int publish(void) {
   struct publish_payload pl = {.counter = messages_received_counter};
+  if (!erpc_crc_check())
+    disable_ps_mode();
+
+  while (!erpc_crc_check())
+    ;
 
   json_obj_encode_buf(json_descr, ARRAY_SIZE(json_descr), &pl, buffer,
                       sizeof(buffer));
@@ -394,6 +399,8 @@ static int publish(void) {
   return publish_message(CONFIG_AWS_PUBLISH_TOPIC,
                          strlen(CONFIG_AWS_PUBLISH_TOPIC), buffer,
                          strlen(buffer));
+  enable_ps_mode();
+  k_sleep(K_MSEC(2000));
 }
 
 void aws_client_loop(void) {
@@ -461,7 +468,7 @@ void aws_client_loop(void) {
 
     if (do_publish) {
       do_publish = false;
-      // publish();
+      publish();
     }
 
     if (do_subscribe) {
@@ -543,8 +550,8 @@ static int resolve_broker_addr(struct sockaddr_in *broker) {
 
 /* Wi-Fi network configuration */
 /* Wi-Fi network configuration */
-#define WIFI_SSID "SSI"
-#define WIFI_PSK "PASSWORD"
+#define WIFI_SSID "ITP-FF"
+#define WIFI_PSK "WiFiNetge@r@1"
 
 /* Test message configuration */
 #define TX_MESSAGE_LEN_MAX 32
