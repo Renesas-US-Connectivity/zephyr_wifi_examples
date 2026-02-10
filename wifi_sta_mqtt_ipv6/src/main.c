@@ -116,9 +116,7 @@ int main(void) {
                                NET_EVENT_WIFI_CONNECT_RESULT);
   net_mgmt_add_event_callback(&cb);
 
-  net_mgmt_init_event_callback(&cb1, net_event_handler,
-                               NET_EVENT_IPV4_ADDR_ADD |
-                                   NET_EVENT_IPV4_DHCP_BOUND);
+  net_mgmt_init_event_callback(&cb1, net_event_handler, NET_EVENT_IPV6_ADDR_ADD);
   net_mgmt_add_event_callback(&cb1);
 
   if (net_mgmt(NET_REQUEST_WIFI_VERSION, iface, &version, sizeof(version)) ==
@@ -153,7 +151,8 @@ int main(void) {
 
 
 #if defined(CONFIG_NET_IPV6)
-  events = k_event_wait(&net_event, NET_EVENT_ALL, true, K_FOREVER);
+      LOG_INF("waiting for IP event!");
+  events = k_event_wait(&net_event, NET_EVENT_ALL, false, K_FOREVER);
   if (events & NET_EVENT_IPV6_ADDR_ADD) {
     LOG_INF("IPv6 address added!");
 
@@ -165,23 +164,6 @@ int main(void) {
       LOG_INF("IPv6 Address: %s", ip6_str);
     }
   }
-#endif
-
-#if defined(CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_PMOD)
-  do {
-    LOG_INF("Waiting for IP address to be assigned...");
-
-    if_addr = net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
-
-    if (if_addr) {
-      net_addr_ntop(AF_INET, if_addr->s4_addr, if_addr_s, sizeof(if_addr_s));
-      LOG_INF("Address: %s", if_addr_s);
-    } else {
-      k_msleep(1000);
-    }
-  } while (if_addr == NULL);
-#else
-  k_msleep(3000);
 #endif
 
   if (net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &status,
