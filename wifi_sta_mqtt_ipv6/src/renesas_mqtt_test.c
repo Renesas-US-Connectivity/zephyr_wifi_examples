@@ -8,7 +8,7 @@ LOG_MODULE_REGISTER(mqtt_test, LOG_LEVEL_DBG);
 
 #define MQTT_CLIENTID "--->>> zephyr MQTT client <<<---"
 // #define MQTT_BROKER_ADDR "3.122.182.249"
-#define MQTT_BROKER_ADDR "2002::9587:2e93:1af8:66b"
+#define MQTT_BROKER_ADDR "2000::f415:6fad:6044:a8"
 #define MQTT_BROKER_PORT 1884
 
 static struct mqtt_client client;
@@ -288,4 +288,3 @@ int connect_to_broker(void) {
 
   return 0;
 }
-

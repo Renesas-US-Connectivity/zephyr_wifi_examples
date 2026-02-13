@@ -89,22 +89,6 @@ static void net_event_handler(struct net_mgmt_event_callback *cb,
   }
 }
 
-static void dhcp_event_handler(struct net_mgmt_event_callback *cb,
-                               uint32_t mgmt_event, struct net_if *iface) {
-  if (mgmt_event == NET_EVENT_IPV4_DHCP_BOUND) {
-    LOG_INF("DHCP bound - we have an IP address!");
-
-    // Get the assigned IP
-    struct in_addr *addr =
-        net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED);
-    if (addr) {
-      char ip_str[NET_IPV4_ADDR_LEN];
-      net_addr_ntop(AF_INET, addr, ip_str, sizeof(ip_str));
-      LOG_INF("IP Address: %s", ip_str);
-    }
-  }
-}
-
 extern int connect_to_broker(void);
 int main(void) {
   int fd;
@@ -167,13 +151,25 @@ int main(void) {
     }
   } while (1);
 
-  do {
-    events = k_event_wait(&net_event, NET_EVENT_ALL, true, K_FOREVER);
-    if (events & NET_EVENT_IPV4_DHCP_BOUND) {
-      LOG_INF("DHCP lease received!");
-      break;
+  events = k_event_wait(&net_event, NET_EVENT_ALL, false, K_FOREVER);
+  if (events & NET_EVENT_IPV4_DHCP_BOUND) {
+    LOG_INF("IPV4 address added!");
+  }
+
+#if defined(CONFIG_NET_IPV6)
+  events = k_event_wait(&net_event, NET_EVENT_ALL, true, K_FOREVER);
+  if (events & NET_EVENT_IPV6_ADDR_ADD) {
+    LOG_INF("IPv6 address added!");
+
+    struct in6_addr *if_addr6 =
+        net_if_ipv6_get_global_addr(NET_ADDR_PREFERRED, &iface);
+    if (if_addr6) {
+      char ip6_str[INET6_ADDRSTRLEN];
+      net_addr_ntop(AF_INET6, if_addr6, ip6_str, sizeof(ip6_str));
+      LOG_INF("IPv6 Address: %s", ip6_str);
     }
-  } while (1);
+  }
+#endif
 
 #if defined(CONFIG_SHIELD_RENESAS_QCIOT_RRQ61051EVZ_PMOD)
   do {
