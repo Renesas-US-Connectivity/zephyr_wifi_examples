@@ -179,6 +179,7 @@ static void mqtt_comm_thread(void *arg1, void *arg2, void *arg3) {
   LOG_ERR("MQTT THREAD START");
 
   for (;;) {
+    LOG_INF("MQTT THREAD: Top of loop, waiting for poll...");
 
     fds.fd = client->transport.tcp.sock;
     fds.events = ZSOCK_POLLIN;
@@ -189,9 +190,9 @@ static void mqtt_comm_thread(void *arg1, void *arg2, void *arg3) {
       continue;
     }
 
-    LOG_INF("socket: %d", fds.fd);
-
     rc = zsock_poll(&fds, 1, -1);
+    LOG_INF("MQTT THREAD: zsock_poll returned %d, revents=0x%08x", rc,
+            fds.revents);
     switch (rc) {
     case 1:
       if (fds.revents & ZSOCK_POLLNVAL) {
@@ -204,7 +205,9 @@ static void mqtt_comm_thread(void *arg1, void *arg2, void *arg3) {
       }
 
       if (fds.revents & ZSOCK_POLLIN) {
+        LOG_INF("POLL IN , call read");
         rc = mqtt_input(client);
+        LOG_INF("MQTT THREAD: mqtt_input returned %d", rc);
         if (rc < 0) {
           LOG_ERR("Failed to read MQTT input: %d, %s", rc, strerror(-rc));
         }
@@ -227,6 +230,7 @@ static void mqtt_comm_thread(void *arg1, void *arg2, void *arg3) {
 
 int connect_to_broker(void) {
   int ret;
+  LOG_INF("Entering connect_to_broker...");
   struct sockaddr_in *broker4 = (struct sockaddr_in *)&broker;
   struct sockaddr_in6 *broker6 = (struct sockaddr_in6 *)&broker;
   char addr_str[INET6_ADDRSTRLEN];
