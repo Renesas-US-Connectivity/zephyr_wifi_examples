@@ -30,7 +30,12 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 #define WIFI_EVENT_CONNECT_SUCCESS BIT(0)
 #define WIFI_EVENT_CONNECT_FAILED BIT(1)
 #define WIFI_EVENT_ALL (WIFI_EVENT_CONNECT_SUCCESS | WIFI_EVENT_CONNECT_FAILED)
-#define NET_EVENT_ALL (NET_EVENT_IPV4_ADDR_ADD | NET_EVENT_IPV4_DHCP_BOUND)
+#define NET_EVENT_ALL (NET_EVENT_IPV6_ADDR_ADD)
+
+/* Application event bits */
+#define APP_EVENT_WIFI_CONNECTED BIT(0)
+#define APP_EVENT_WIFI_FAILED BIT(1)
+#define APP_EVENT_IPV6_ADDR_READY BIT(2)
 
 static void print_wifi_status(struct wifi_iface_status *status);
 
@@ -52,10 +57,10 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
   case NET_EVENT_WIFI_CONNECT_RESULT:
     if (status->status == 0) {
       LOG_INF("Connected to AP!");
-      k_event_set(&connect_event, WIFI_EVENT_CONNECT_SUCCESS);
+      k_event_set(&connect_event, APP_EVENT_WIFI_CONNECTED);
     } else {
       LOG_INF("Failed to connect to AP!");
-      k_event_set(&connect_event, WIFI_EVENT_CONNECT_FAILED);
+      k_event_set(&connect_event, APP_EVENT_WIFI_FAILED);
     }
     break;
   default:
@@ -65,24 +70,18 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb,
 
 static void net_event_handler(struct net_mgmt_event_callback *cb,
                               uint64_t mgmt_event, struct net_if *iface) {
-  const struct wifi_status *status = (const struct wifi_status *)cb->info;
-
-  LOG_INF("NET event - layer: %llx code: %llx cmd: %llx status: %d",
+  LOG_INF("NET event - layer: %llx code: %llx cmd: %llx",
           NET_MGMT_GET_LAYER(mgmt_event), NET_MGMT_GET_LAYER_CODE(mgmt_event),
-          NET_MGMT_GET_COMMAND(mgmt_event), status->status);
+          NET_MGMT_GET_COMMAND(mgmt_event));
 
   switch (mgmt_event) {
-  case NET_EVENT_IPV4_ADDR_ADD:
-    k_event_set(&net_event, NET_EVENT_IPV4_ADDR_ADD);
-    LOG_INF("IPv4 address added");
-    break;
-  case NET_EVENT_IPV4_DHCP_BOUND:
-    k_event_set(&net_event, NET_EVENT_IPV4_DHCP_BOUND);
-    LOG_INF("DHCP bound - we have an IP address!");
-    break;
   case NET_EVENT_IPV6_ADDR_ADD:
-    k_event_set(&net_event, NET_EVENT_IPV6_ADDR_ADD);
-    LOG_INF("IPv6 address added");
+    if (net_if_ipv6_get_global_addr(NET_ADDR_PREFERRED, &iface)) {
+      LOG_INF("IPv6 address added (Global) - signaling main...");
+      k_event_set(&net_event, APP_EVENT_IPV6_ADDR_READY);
+    } else {
+      LOG_INF("IPv6 address added (Link-local)");
+    }
     break;
   default:
     break;
@@ -116,7 +115,8 @@ int main(void) {
                                NET_EVENT_WIFI_CONNECT_RESULT);
   net_mgmt_add_event_callback(&cb);
 
-  net_mgmt_init_event_callback(&cb1, net_event_handler, NET_EVENT_IPV6_ADDR_ADD);
+  net_mgmt_init_event_callback(&cb1, net_event_handler,
+                               NET_EVENT_IPV6_ADDR_ADD);
   net_mgmt_add_event_callback(&cb1);
 
   if (net_mgmt(NET_REQUEST_WIFI_VERSION, iface, &version, sizeof(version)) ==
@@ -142,19 +142,21 @@ int main(void) {
       return 0;
     }
 
-    events = k_event_wait(&connect_event, WIFI_EVENT_ALL, true, K_FOREVER);
-    if (events == WIFI_EVENT_CONNECT_SUCCESS) {
+    events = k_event_wait(&connect_event,
+                          APP_EVENT_WIFI_CONNECTED | APP_EVENT_WIFI_FAILED,
+                          true, K_FOREVER);
+    if (events == APP_EVENT_WIFI_CONNECTED) {
       LOG_INF("Joined network!");
       break;
     }
   } while (1);
 
-
 #if defined(CONFIG_NET_IPV6)
-      LOG_INF("waiting for IP event!");
-  events = k_event_wait(&net_event, NET_EVENT_ALL, false, K_FOREVER);
-  if (events & NET_EVENT_IPV6_ADDR_ADD) {
-    LOG_INF("IPv6 address added!");
+  LOG_INF("waiting for Global IPv6 address ready event...");
+  events =
+      k_event_wait(&net_event, APP_EVENT_IPV6_ADDR_READY, false, K_FOREVER);
+  if (events & APP_EVENT_IPV6_ADDR_READY) {
+    LOG_INF("IP event received (Global address ready)");
 
     struct in6_addr *if_addr6 =
         net_if_ipv6_get_global_addr(NET_ADDR_PREFERRED, &iface);
@@ -166,11 +168,13 @@ int main(void) {
   }
 #endif
 
+  LOG_INF("Getting Wi-Fi interface status...");
   if (net_mgmt(NET_REQUEST_WIFI_IFACE_STATUS, iface, &status,
                sizeof(struct wifi_iface_status))) {
     LOG_INF("Wi-Fi iface status request failed");
     return 0;
   }
+  LOG_INF("Wi-Fi interface status:");
   print_wifi_status(&status);
 
   connect_to_broker();
