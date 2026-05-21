@@ -12,11 +12,22 @@
 #include <zephyr/logging/log.h>
 
 LOG_MODULE_REGISTER(tcp_client, LOG_LEVEL_INF);
-#define WIFI_SSID               "SSID"
-#define WIFI_PSK                "PASSWORD"
+#if 1
+#define WIFI_SSID               "TPLINK_SAME"
+#define WIFI_PSK                "12345678"
 /* TCP server configuration */
-#define SERVER_IP                   "192.168.1.1"
+#define SERVER_IP                   "192.168.31.100"
 #define SERVER_PORT                 10001
+#endif
+
+#if 0
+#define WIFI_SSID               "RenesasMatter"
+#define WIFI_PSK                "Matter2023"
+/* TCP server configuration */
+#define SERVER_IP                   "192.168.50.58"
+#define SERVER_PORT                 10001
+#endif
+
 
 #define TX_MESSAGE_LEN_MAX  64
 #define RX_MESSAGE_LEN_MAX  64
@@ -94,7 +105,7 @@ static void set_low_power_mode(struct net_if *iface, uint16_t listen_interval, u
     p.wakeup_mode = WIFI_PS_WAKEUP_MODE_LISTEN_INTERVAL;
     wifi_ps_set(iface, &p);
     p.type = WIFI_PS_PARAM_EXIT_STRATEGY;
-    p.exit_strategy = WIFI_PS_EXIT_CUSTOM_ALGO;
+    p.exit_strategy = WIFI_PS_EXIT_EVERY_TIM;
     wifi_ps_set(iface, &p);
     p.type = WIFI_PS_PARAM_TIMEOUT;
     p.timeout_ms = timeout_ms;
@@ -168,6 +179,7 @@ int main(void)
     struct net_if *iface = net_if_get_wifi_sta();
     struct wifi_connect_req_params config = {0};
     struct in_addr *if_addr;
+    int s_cnt = 0;
     const struct device *gpio_wakeup_dev = NULL;
 
     if (!iface) {
@@ -237,70 +249,172 @@ int main(void)
     }
 
     LOG_INF("Entering DPM power save (allow RA sleep)...");
-    set_low_power_mode(iface, 10, 1000);
+    set_low_power_mode(iface, 10, 100);
     LOG_INF("Host waiting 10s while RA sleeps...");
     k_sleep(K_SECONDS(10));
     
-	LOG_INF("--- Demonstrating wakeup pulse ---");
-	gpio_trigger_wakeup(gpio_wakeup_dev);
-	LOG_INF("--- Wakeup demo complete ---");
+	// LOG_INF("--- Demonstrating wakeup pulse ---");
+	// gpio_trigger_wakeup(gpio_wakeup_dev);
+	// LOG_INF("--- Wakeup demo complete ---");
 
-    LOG_INF("Restoring Active Mode...");
-    k_msleep(5000);
-    LOG_INF("Step3: Sending 10 packets x 10 bytes...");
-    for (int i = 0; i < 10; i++) {
-        char pkt[11];
-        memset(pkt, 'A' + (i % 26), 10);
-        pkt[10] = '\0';
+    // LOG_INF("Restoring Active Mode...");
+    // k_msleep(5000);
+    // LOG_INF("Step3: Sending 10 packets x 10 bytes...");
+    // for (int i = 0; i < 10; i++) {
+    //     char pkt[11];
+    //     memset(pkt, 'A' + (i % 26), 10);
+    //     pkt[10] = '\0';
 
-        int s = send(fd, pkt, 10, 0);
-        if (s < 0) {
-            LOG_ERR("send failed i=%d errno=%d", i, errno);
-            break;
-        } else {
-            LOG_INF("sent pkt %d (%d bytes)", i, s);
-        }
-        k_msleep(50);
-    }
-    k_sleep(K_SECONDS(2));
-    LOG_INF("Step4: Re-entering DPM power save (allow RA sleep again)...");
-    wifi_ps_state_set(iface, true);
-    k_sleep(K_SECONDS(5));
-    k_timer_init(&rx_timer, rx_timer_cb, NULL);
-while (1) {
+    //     int s = send(fd, pkt, 10, 0);
+    //     if (s < 0) {
+    //         LOG_ERR("send failed i=%d errno=%d", i, errno);
+    //         break;
+    //     } else {
+    //         LOG_INF("sent pkt %d (%d bytes)", i, s);
+    //     }
+    //     k_msleep(50);
+    // }
+    // k_sleep(K_SECONDS(2));
+    // LOG_INF("Step4: Re-entering DPM power save (allow RA sleep again)...");
+    // wifi_ps_state_set(iface, true);
+    // k_sleep(K_SECONDS(10));
+    // k_timer_init(&rx_timer, rx_timer_cb, NULL);
 
-    rx_pending = false;
- k_sleep(K_SECONDS(5));
-    /* Start timer */
-    k_timer_start(&rx_timer, K_SECONDS(10), K_NO_WAIT);
 
-    /* Wait until timer expires */
-    while (!rx_pending) {
-         LOG_INF("RX: waking RA6W1");
-        k_sleep(K_MSEC(100));
-    }
 
+    ///////////////////////////////////
+    //  LOG_INF("Restoring Active Mode...");
+    // k_msleep(5000);
+    // LOG_INF("Step3: Sending 10 packets x 10 bytes...");
+    // for (int i = 0; i < 10; i++) {
+    //     char pkt[11];
+    //     memset(pkt, 'A' + (i % 26), 10);
+    //     pkt[10] = '\0';
+
+    //     int s = send(fd, pkt, 10, 0);
+    //     if (s < 0) {
+    //         LOG_ERR("send failed i=%d errno=%d", i, errno);
+    //         break;
+    //     } else {
+    //         LOG_INF("sent pkt %d (%d bytes)", i, s);
+    //     }
+    //    // k_msleep(50);
+    //    LOG_INF("Entering DPM power save (allow RA sleep)...");
+    // set_low_power_mode(iface, 10, 1000);
+    // LOG_INF("Host waiting 10s while RA sleeps...");
+    // k_sleep(K_SECONDS(10));
+
+    // LOG_INF("--- Demonstrating wakeup pulse ---");
+	// gpio_trigger_wakeup(gpio_wakeup_dev);
+	// LOG_INF("--- Wakeup demo complete ---");
+
+    // }
+    // k_sleep(K_SECONDS(2));
+    // LOG_INF("Step4: Re-entering DPM power save (allow RA sleep again)...");
+    // wifi_ps_state_set(iface, true);
+    // k_sleep(K_SECONDS(10));
+    // k_timer_init(&rx_timer, rx_timer_cb, NULL);
+
+// while (1) {
+
+//     rx_pending = false;
+//  k_sleep(K_SECONDS(5));
+//     /* Start timer */
+//     k_timer_start(&rx_timer, K_SECONDS(10), K_NO_WAIT);
+
+//     /* Wait until timer expires */
+//     while (!rx_pending) {
+//          LOG_INF("RX: waking RA6W1");
+//         k_sleep(K_MSEC(100));
+//     }
+
+//     gpio_trigger_wakeup(g_gpio_wakeup_dev);
+//     k_msleep(1000);
+//     /* Do recv ONCE */
+//     int rcvd = recv(fd, rx, sizeof(rx) - 1, 0);
+
+//     if (rcvd < 0) {
+//         LOG_INF("recv failed: %d", errno);
+//         continue;   /* retry next cycle */
+//     }
+
+//     if (rcvd == 0) {
+//         LOG_INF("Connection closed by peer");
+//         break;      /* exit loop permanently */
+//     }
+
+//     /* Successful recv */
+//     rx[rcvd] = '\0';
+//     LOG_INF("Received %d bytes: %s", rcvd, rx);
+
+//     /* ✅ Break after recv works */
+//     break;
+// }
+//     return 0;
+// }
+// k_msleep(10000);
+while (1)
+{
+ 
+#if 1
+/* Code to Test send alone continously in a loop
+* enable the macro to test send alone in a loop 
+*/
+    // k_msleep(10000);
+    printf("-----waking up TIN with GPIO-----\n");
     gpio_trigger_wakeup(g_gpio_wakeup_dev);
+    wifi_ps_state_set(iface, false);
     k_msleep(1000);
-    /* Do recv ONCE */
-    int rcvd = recv(fd, rx, sizeof(rx) - 1, 0);
-
-    if (rcvd < 0) {
-        LOG_INF("recv failed: %d", errno);
-        continue;   /* retry next cycle */
+    char tx_pkt[10] = "DATA_10B";
+    while (s_cnt < 3)
+    {
+        int s_ret = send(fd, tx_pkt, 10, 0);
+        if (s_ret < 0) {
+            //send(fd, tx_pkt, 10, 0);
+            s_cnt++;
+            LOG_ERR("Send failed: %d", errno);
+        } else {
+            s_cnt = 0;
+            LOG_INF("Sent 10 bytes");
+            break;
+        }    
     }
-
-    if (rcvd == 0) {
-        LOG_INF("Connection closed by peer");
-        break;      /* exit loop permanently */
+    k_msleep(2000);
+    LOG_INF("Re-enabling PS mode");
+    wifi_ps_state_set(iface, true);
+    k_msleep(10000);
+#endif  
+#if 0
+/* Code to Test recv alone continously in a loop
+* enable the macro to test recv alone in a loop 
+*/
+    char rx_buf[RX_MESSAGE_LEN_MAX];
+    printf("--- check gpio state\n---");
+    int cnt = 0;
+    while (erpc_wifi_transport_slave_ready() != 1) {
+        if (cnt != 1)
+        {
+            printf("Waiting for slave_ready to go high...\n");
+            cnt = 1;    
+        }
     }
-
-    /* Successful recv */
-    rx[rcvd] = '\0';
-    LOG_INF("Received %d bytes: %s", rcvd, rx);
-
-    /* ✅ Break after recv works */
-    break;
+    uint32_t start_time = k_uptime_get_32();
+    while (k_uptime_get_32() - start_time < 5000) {
+            LOG_INF("Polling for data...");
+            int r_ret = recv(fd, rx_buf, sizeof(rx_buf) - 1, 0);
+            if (r_ret > 0) {
+                rx_buf[r_ret] = '\0';
+                LOG_INF("[RX] Received: %s", rx_buf);
+                break;
+            } 
+            /*else if (r_ret < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                LOG_ERR("Recv error: %d", errno);
+                break;
+            }*/
+            k_msleep(100);
+        }
+        wifi_ps_state_set(iface, true);
+#endif
 }
-    return 0;
+return 0;
 }
