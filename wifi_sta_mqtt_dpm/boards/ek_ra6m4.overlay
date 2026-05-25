@@ -1,0 +1,21 @@
+/*
+ * Copyright (c) 2025 Renesas Electronics Corporation
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Device tree overlay for GPIO wakeup on P206
+ */
+
+/ {
+    aliases {
+        wakeup-gpio = &gpio_wakeup;
+    };
+
+    gpio_wakeup {
+        compatible = "gpio-leds";
+        gpio_wakeup: wakeup_gpio {
+            gpios = <&ioport2 6 GPIO_ACTIVE_LOW>;
+            label = "Wakeup GPIO P206";
+        };
+    };
+};
