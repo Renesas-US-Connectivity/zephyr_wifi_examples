@@ -18,9 +18,9 @@
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 /* Wi-Fi network configuration */
-/* Wi-Fi network configuration */
-#define WIFI_SSID "RenesasMatter"
-#define WIFI_PSK "Matter2023"
+
+#define WIFI_SSID            "TP-Link_1218" 
+#define WIFI_PSK             "74512829"
 
 /* TCP server configuration */
 #define SERVER_IP "192.168.56.1"
@@ -53,17 +53,10 @@ K_EVENT_DEFINE(net_event);
 
 extern int is_subscribed;
 void erpc_wifi_gpio_trigger_wakeup(void);
-static const struct device *g_gpio_wakeup_dev;
-static struct k_timer rx_timer;
-static struct k_timer rx_timer;
-static volatile bool rx_pending = false;
+const struct device *g_gpio_wakeup_dev;
 
 struct k_mutex erpc_mutex;
 
-static void rx_timer_cb(struct k_timer *timer) {
-  ARG_UNUSED(timer);
-  rx_pending = true;
-}
 int wifi_ps_set(struct net_if *iface, struct wifi_ps_params *p) {
   LOG_INF("Setting Wi-Fi Power Save: type=%d", p->type);
   k_mutex_lock(&erpc_mutex, K_FOREVER);
@@ -108,11 +101,15 @@ void set_low_power_mode(struct net_if *iface, uint16_t listen_interval,
   LOG_INF("Setting LOW POWER mode (DPM)...");
   struct wifi_ps_params p = {0};
 
+  p.type = WIFI_PS_PARAM_LISTEN_INTERVAL;
+  p.listen_interval = listen_interval;
+  wifi_ps_set(iface, &p);
+
   p.type = WIFI_PS_PARAM_WAKEUP_MODE;
   p.wakeup_mode = WIFI_PS_WAKEUP_MODE_LISTEN_INTERVAL;
   wifi_ps_set(iface, &p);
   p.type = WIFI_PS_PARAM_EXIT_STRATEGY;
-  p.exit_strategy = WIFI_PS_EXIT_CUSTOM_ALGO;
+  p.exit_strategy = WIFI_PS_EXIT_EVERY_TIM;
   wifi_ps_set(iface, &p);
   p.type = WIFI_PS_PARAM_TIMEOUT;
   p.timeout_ms = timeout_ms;
@@ -146,7 +143,7 @@ static int gpio_wakeup_init(const struct device **gpio_dev) {
 /**
  * @brief Trigger wakeup pulse on GPIO (active low for 20ms)
  */
-static void gpio_trigger_wakeup(const struct device *gpio_dev) {
+void gpio_trigger_wakeup(const struct device *gpio_dev) {
   if (gpio_dev == NULL) {
     LOG_WRN("GPIO device not initialized");
     return;
@@ -154,9 +151,6 @@ static void gpio_trigger_wakeup(const struct device *gpio_dev) {
 
   LOG_INF("Triggering wakeup pulse on GPIO pin %d (active low for %dms)",
           GPIO_WAKEUP_PIN, WAKEUP_PULSE_DURATION_MS);
-
-  gpio_pin_set(gpio_dev, GPIO_WAKEUP_PIN, 0);
-  k_msleep(WAKEUP_PULSE_DURATION_MS);
 
   gpio_pin_set(gpio_dev, GPIO_WAKEUP_PIN, 1);
   k_msleep(WAKEUP_PULSE_DURATION_MS);
@@ -271,7 +265,7 @@ int main(void) {
   LOG_INF("Setting Listen interval...\n");
   struct wifi_ps_params p = {0};
   p.type = WIFI_PS_PARAM_LISTEN_INTERVAL;
-  p.listen_interval = 20;
+  p.listen_interval = 10;
   wifi_ps_set(iface, &p);
 
   k_msleep(1000);

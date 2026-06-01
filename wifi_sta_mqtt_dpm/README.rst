@@ -54,17 +54,17 @@ following pins will be used:
 +-------------+-------------------+
 | EK-RA6M4    | QCIOT-RRQ61051EVZ |
 +-------------+-------------------+
-| P204 (SCK)  | P0_09 (SCK)       |
+| P204 (SCK)  | P0_08 (SCK)       |
 +-------------+-------------------+
-| P205 (CS)   | P0_08 (CS)        |
+| P205 (CS)   | P0_09 (CS)        |
 +-------------+-------------------+
-| P203 (MOSI) | P0_05 (MOSI)      |
+| P203 (MOSI) | P0_11 (MOSI)      |
 +-------------+-------------------+
-| P202 (MISO) | P0_12 (MISO)      |
+| P202 (MISO) | P0_10 (MISO)      |
 +-------------+-------------------+
-| P408 (RDY)  | P0_06 (RDY)       |
+| P206 (RDY)  | P0_13 (RDY)       |
 +-------------+-------------------+
-| P409 (INT)  | P0_07 (INT)       |
+| P409 (INT)  | P0_12 (INT)       |
 +-------------+-------------------+
 | P115 (RST)  | RST_N (RST)       |
 +-------------+-------------------+
@@ -76,14 +76,14 @@ Build and flash for the EK-RA8M1 connected to the RRQ61051EVZ using the PMOD UAR
 
 .. code-block:: none
 
-   west build wifi_sta_tcp_client -b ek_ra8m1 -p always -DSHIELD=renesas_qciot_rrq61051evz_pmod
+   west build wifi_sta_mqtt_dpm -b ek_ra8m1 -p always -DSHIELD=renesas_qciot_rrq61051evz_pmod
    west flash
 
 Build and flash for the EK-RA6M4 connected to the RRQ61051EVZ using the MikroBUS SPI interface:
 
 .. code-block:: none
 
-   west build wifi_sta_tcp_client -b ek_ra6m4 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus
+   west build wifi_sta_mqtt_dpm -b ek_ra6m4 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus
    west flash
 
 After flashing, you can observe the state of the application via the console.
