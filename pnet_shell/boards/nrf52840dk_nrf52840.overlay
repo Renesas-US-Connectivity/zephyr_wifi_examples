@@ -24,14 +24,25 @@
     gpio_wakeup {
         compatible = "gpio-leds";
         gpio_wakeup: wakeup_gpio {
-           gpios = <&gpio0 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
-            label = "Wakeup GPIO P0.10";
+            gpios = <&gpio1 7 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+            label = "Wakeup GPIO P1.7";
         };
     };
 };
 
+/delete-node/ &button2;
+/delete-node/ &button3;
+
+/* Remove aliases to deleted buttons */
+/ {
+    aliases {
+        /delete-property/ sw2;
+        /delete-property/ sw3;
+    };
+};
+
 &pinctrl {
-    spi4_default: spi4_default {
+    spi3_default: spi3_default {
         group1 {
             psels = <NRF_PSEL(SPIM_SCK, 1, 15)>,
                     <NRF_PSEL(SPIM_MISO, 1, 14)>,
@@ -39,7 +50,7 @@
        
         };
     };
-    spi4_sleep: spi4_sleep {
+    spi3_sleep: spi3_sleep {
         group1 {
             psels = <NRF_PSEL(SPIM_SCK, 1, 15)>,
                     <NRF_PSEL(SPIM_MISO, 1, 14)>,
@@ -50,13 +61,13 @@
     };
 };
 
-&spi4 {
+&spi3 {
     compatible = "nordic,nrf-spim";
     status = "okay";
-    cs-gpios = <&gpio1 12 (GPIO_ACTIVE_LOW)>;
+    cs-gpios = <&gpio1 6 (GPIO_ACTIVE_LOW)>;
  
-    pinctrl-0 = <&spi4_default>;
-    pinctrl-1 = <&spi4_sleep>;
+    pinctrl-0 = <&spi3_default>;
+    pinctrl-1 = <&spi3_sleep>;
     pinctrl-names = "default", "sleep";
  
     ra6w1_erpc_wifi: ra6w1_erpc_wifi@0 {
@@ -65,8 +76,8 @@
         label = "RA6W1";
         spi-max-frequency = <200000>;
         boot-duration-ms = <2000>;
-        int-gpios = <&gpio0 24 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
-        reset-gpios = <&gpio1 11 GPIO_ACTIVE_LOW>;
+        int-gpios = <&gpio1 4 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+        reset-gpios = <&gpio1 5 GPIO_ACTIVE_LOW>;
         status = "okay";
     };
 };

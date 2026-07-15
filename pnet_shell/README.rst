@@ -153,9 +153,8 @@ Build and flash for the nrf5340dk connected to the RRQ61051EVZ using the MikroBU
 
 .. code-block:: none
 
-   west build pnet_shell -b nrf5340dk_nrf5340_cpuapp -p always 
+   west build pnet_shell -b nrf5340dk/nrf5340/cpuapp -p always 
    west flash
-
 
 Build and flash for the EK-RA6M4 connected to the RRQ61051EVZ using the MikroBUS SPI interface:
 
@@ -164,5 +163,12 @@ Build and flash for the EK-RA6M4 connected to the RRQ61051EVZ using the MikroBUS
    west build pnet_shell -b ek_ra6m4 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus_spi
    west flash
 
+Build and flash for the nrf52840dk connected to the RRQ61051EVZ using the MikroBUS SPI interface:
+
+.. code-block:: none
+
+   west build pnet_shell -b nrf52840dk/nrf52840 -p always 
+   west flash
+   
 After flashing, you can observe the state of the application via the console.
 
