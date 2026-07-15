@@ -153,7 +153,7 @@ Build and flash for the nrf5340dk connected to the RRQ61051EVZ using the MikroBU
 
 .. code-block:: none
 
-   west build pnet_shell -b nrf5340dk_nrf5340_cpuapp -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus_spi
+   west build pnet_shell -b nrf5340dk_nrf5340_cpuapp -p always 
    west flash
 
 
