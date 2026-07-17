@@ -1,0 +1,16 @@
+[ req ]
+distinguished_name = dn
+prompt = no
+
+[ dn ]
+C = IN
+ST = Kerala
+L = Kochi
+O = Renesas
+OU = IoT
+CN = MyAWSDevice
+
+[ v3_req ]
+basicConstraints = CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth

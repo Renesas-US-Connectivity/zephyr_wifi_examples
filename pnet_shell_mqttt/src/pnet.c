@@ -24,7 +24,6 @@
 #include <sample_usbd.h>
 #include <zephyr/net/net_config.h>
 #endif
-#include <zephyr/sys/reboot.h>
 
 
 #ifdef CONFIG_SHELL
@@ -45,8 +44,7 @@ static int cmd_init(const struct shell *shell, size_t argc, char **argv)
 	return 0;
 }
 
-#define PNET_MAX_SOCKETS 4
-static int tsocks[PNET_MAX_SOCKETS] = {-1, -1, -1, -1};
+static int tsock = -1;
 
 struct pnet_test_stats {
 	uint32_t pass;
@@ -134,26 +132,18 @@ static void test_stats_print(const struct shell *sh, const char *name, const str
 			name, s->pass, s->fail, s->last_err, min, avg, s->max_latency_ms);
 }
 
-static int pnet_tcp_close_if_open(int id)
+static int pnet_tcp_close_if_open(void)
 {
-	if (id < 0 || id >= PNET_MAX_SOCKETS) {
-		return -EINVAL;
-	}
-
-	if (tsocks[id] >= 0) {
-		(void)zsock_close(tsocks[id]);
-		tsocks[id] = -1;
+	if (tsock >= 0) {
+		(void)zsock_close(tsock);
+		tsock = -1;
 	}
 
 	return 0;
 }
 
-static int pnet_tcp_connect_internal(int id, const char *ip, uint16_t port)
+static int pnet_tcp_connect_internal(const char *ip, uint16_t port)
 {
-	if (id < 0 || id >= PNET_MAX_SOCKETS) {
-		return -EINVAL;
-	}
-
 	struct timeval tv = {
 		.tv_sec = 5,
 		.tv_usec = 0,
@@ -164,47 +154,43 @@ static int pnet_tcp_connect_internal(int id, const char *ip, uint16_t port)
 	};
 	int rc;
 
-	pnet_tcp_close_if_open(id);
+	pnet_tcp_close_if_open();
 
 	if (zsock_inet_pton(AF_INET, ip, &addr.sin_addr) != 1) {
 		return -EINVAL;
 	}
 
-	tsocks[id] = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (tsocks[id] < 0) {
+	tsock = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (tsock < 0) {
 		return -errno;
 	}
 
-	(void)zsock_setsockopt(tsocks[id], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-	(void)zsock_setsockopt(tsocks[id], SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+	(void)zsock_setsockopt(tsock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	(void)zsock_setsockopt(tsock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-	rc = zsock_connect(tsocks[id], (struct sockaddr *)&addr, sizeof(addr));
+	rc = zsock_connect(tsock, (struct sockaddr *)&addr, sizeof(addr));
 	if (rc < 0) {
 		rc = -errno;
-		pnet_tcp_close_if_open(id);
+		pnet_tcp_close_if_open();
 		return rc;
 	}
 
 	return 0;
 }
 
-static int pnet_tcp_txrx_once(int id, const char *payload)
+static int pnet_tcp_txrx_once(const char *payload)
 {
-	if (id < 0 || id >= PNET_MAX_SOCKETS) {
-		return -EINVAL;
-	}
-
 	int tx;
 	size_t plen = strlen(payload);
 
-	tx = zsock_send(tsocks[id], payload, plen, 0);
+	tx = zsock_send(tsock, payload, plen, 0);
 	if (tx < 0) {
 		printk("test_tcp_loop tx failed: errno=%d\\n", errno);
 		return -errno;
 	}
 	printk("test_tcp_loop tx bytes=%d payload='%s'\\n", tx, payload);
 	/* Keep old send+recv behavior as reference.
-	 * rcv = zsock_recv(tsocks[id], rx, sizeof(rx) - 1, 0);
+	 * rcv = zsock_recv(tsock, rx, sizeof(rx) - 1, 0);
 	 * if (rcv < 0) {
 	 * 	printk("test_tcp_loop rx failed: errno=%d\\n", errno);
 	 * 	return -errno;
@@ -273,13 +259,13 @@ static int cmd_tcp_connect(const struct shell *sh, size_t argc, char *argv[])
 		return 1;
 	}
 
-	if (tsocks[0] > -1) {
+	if (tsock > -1) {
 		shell_error(sh, "Socket already connected");
 		return 1;
 	}
 
 	printk("Connecting to %s:%s\n", argv[1], argv[2]);
-	rc = pnet_tcp_connect_internal(0, argv[1], (uint16_t)port);
+	rc = pnet_tcp_connect_internal(argv[1], (uint16_t)port);
 	if (rc) {
 		shell_error(sh, "Failed to connect socket");
 		return 1;
@@ -292,12 +278,13 @@ static int cmd_tcp_connect(const struct shell *sh, size_t argc, char *argv[])
 
 static int cmd_tcp_disconnect(const struct shell *sh, size_t argc, char *argv[])
 {
-	if (tsocks[0] < 0) {
+	if (tsock < 0) {
 		shell_error(sh, "Socket not connected");
 		return 1;
 	}
 
-	pnet_tcp_close_if_open(0);
+	zsock_close(tsock);
+	tsock = -1;
 	shell_print(sh, "TCP disconnect successful");
 
 	return 0;
@@ -305,12 +292,12 @@ static int cmd_tcp_disconnect(const struct shell *sh, size_t argc, char *argv[])
 
 static int cmd_tcp_tx(const struct shell *sh, size_t argc, char *argv[])
 {
-	if (tsocks[0] < 0) {
+	if (tsock < 0) {
 		shell_error(sh, "Socket not connected");
 		return 1;
 	}
 
-	int rc = zsock_send(tsocks[0], argv[1], strlen(argv[1]), 0);
+	int rc = zsock_send(tsock, argv[1], strlen(argv[1]), 0);
 	if (rc < 0) {
 		shell_error(sh, "Failed to send data");
 		return 1;
@@ -322,130 +309,13 @@ static int cmd_tcp_tx(const struct shell *sh, size_t argc, char *argv[])
 
 static int cmd_tcp_rx(const struct shell *sh, size_t argc, char *argv[])
 {
-	if (tsocks[0] < 0) {
+	if (tsock < 0) {
 		shell_error(sh, "Socket not connected");
 		return 1;
 	}
 
 	char buf[1024];
-	int rc = zsock_recv(tsocks[0], buf, sizeof(buf) - 1, 0);
-	if (rc < 0) {
-		shell_error(sh, "Failed to receive data");
-		return 1;
-	}
-	buf[rc] = 0;
-	shell_print(sh, "TCP recv: %s", buf);
-
-	return 0;
-}
-
-static int cmd_tcp_connect_id(const struct shell *sh, size_t argc, char *argv[])
-{
-	uint32_t id, port;
-	int rc;
-
-	if (argc != 4) {
-		shell_error(sh, "Usage: tcp_connect_id <id> <ip> <port>\n");
-		return 1;
-	}
-	if (!parse_u32_arg(argv[1], &id) || id >= PNET_MAX_SOCKETS) {
-		shell_error(sh, "Invalid id");
-		return 1;
-	}
-	if (!parse_u32_arg(argv[3], &port) || port == 0U || port > UINT16_MAX) {
-		shell_error(sh, "Invalid port");
-		return 1;
-	}
-
-	if (tsocks[id] > -1) {
-		shell_error(sh, "Socket already connected");
-		return 1;
-	}
-
-	printk("Connecting to %s:%s on id %u\n", argv[2], argv[3], id);
-	rc = pnet_tcp_connect_internal(id, argv[2], (uint16_t)port);
-	if (rc) {
-		shell_error(sh, "Failed to connect socket");
-		return 1;
-	}
-
-	shell_print(sh, "TCP connect successful");
-
-	return 0;
-}
-
-static int cmd_tcp_disconnect_id(const struct shell *sh, size_t argc, char *argv[])
-{
-	uint32_t id;
-
-	if (argc != 2) {
-		shell_error(sh, "Usage: tcp_disconnect_id <id>\n");
-		return 1;
-	}
-	if (!parse_u32_arg(argv[1], &id) || id >= PNET_MAX_SOCKETS) {
-		shell_error(sh, "Invalid id");
-		return 1;
-	}
-
-	if (tsocks[id] < 0) {
-		shell_error(sh, "Socket not connected");
-		return 1;
-	}
-
-	pnet_tcp_close_if_open(id);
-	shell_print(sh, "TCP disconnect successful");
-
-	return 0;
-}
-
-static int cmd_tcp_tx_id(const struct shell *sh, size_t argc, char *argv[])
-{
-	uint32_t id;
-
-	if (argc != 3) {
-		shell_error(sh, "Usage: tcp_tx_id <id> <data>\n");
-		return 1;
-	}
-	if (!parse_u32_arg(argv[1], &id) || id >= PNET_MAX_SOCKETS) {
-		shell_error(sh, "Invalid id");
-		return 1;
-	}
-
-	if (tsocks[id] < 0) {
-		shell_error(sh, "Socket not connected");
-		return 1;
-	}
-
-	int rc = zsock_send(tsocks[id], argv[2], strlen(argv[2]), 0);
-	if (rc < 0) {
-		shell_error(sh, "Failed to send data");
-		return 1;
-	}
-	shell_print(sh, "TCP send successful");
-
-	return 0;
-}
-
-static int cmd_tcp_rx_id(const struct shell *sh, size_t argc, char *argv[])
-{
-	uint32_t id;
-
-	if (argc != 2) {
-		shell_error(sh, "Usage: tcp_rx_id <id>\n");
-		return 1;
-	}
-	if (!parse_u32_arg(argv[1], &id) || id >= PNET_MAX_SOCKETS) {
-		shell_error(sh, "Invalid id");
-		return 1;
-	}
-
-	if (tsocks[id] < 0) {
-		shell_error(sh, "Socket not connected");
-		return 1;
-	}
-
-	char buf[1024];
-	int rc = zsock_recv(tsocks[id], buf, sizeof(buf) - 1, 0);
+	int rc = zsock_recv(tsock, buf, sizeof(buf) - 1, 0);
 	if (rc < 0) {
 		shell_error(sh, "Failed to receive data");
 		return 1;
@@ -815,7 +685,7 @@ static int cmd_test_tcp_loop(const struct shell *sh, size_t argc, char **argv)
 	 * 	return 1;
 	 * }
 	 */
-	if (tsocks[0] < 0) {
+	if (tsock < 0) {
 		shell_error(sh,
 			    "Socket not connected. Use: pnet tcp_connect <ip> <port> before test_tcp_loop");
 		return 1;
@@ -829,13 +699,13 @@ static int cmd_test_tcp_loop(const struct shell *sh, size_t argc, char **argv)
 		int64_t t0 = k_uptime_get();
 
 		/* Keep old reconnect-per-iteration behavior as reference.
-		 * rc = pnet_tcp_connect_internal(0, argv[1], (uint16_t)port);
+		 * rc = pnet_tcp_connect_internal(argv[1], (uint16_t)port);
 		 * if (rc == 0) {
-		 * 	rc = pnet_tcp_txrx_once(0, payload);
+		 * 	rc = pnet_tcp_txrx_once(payload);
 		 * }
-		 * (void)pnet_tcp_close_if_open(0);
+		 * (void)pnet_tcp_close_if_open();
 		 */
-		rc = pnet_tcp_txrx_once(0, payload);
+		rc = pnet_tcp_txrx_once(payload);
 
 		if (rc == 0) {
 			shell_print(sh, "TC-TCP-LOOP,iter=%u/%u,status=PASS", i + 1U, count);
@@ -1023,11 +893,11 @@ static int cmd_test_soak(const struct shell *sh, size_t argc, char **argv)
 		int64_t t0;
 
 		t0 = k_uptime_get();
-		rc = pnet_tcp_connect_internal(0, argv[2], (uint16_t)port);
+		rc = pnet_tcp_connect_internal(argv[2], (uint16_t)port);
 		if (rc == 0) {
-			rc = pnet_tcp_txrx_once(0, "SOAK_PING");
+			rc = pnet_tcp_txrx_once("SOAK_PING");
 		}
-		(void)pnet_tcp_close_if_open(0);
+		(void)pnet_tcp_close_if_open();
 		if (rc == 0) {
 			test_stats_add(&tcp_stats, true, 0, k_uptime_get() - t0);
 		} else {
@@ -1103,16 +973,16 @@ static int run_tc008_ps_idle_then_tx(const struct shell *sh, const char *ip, uin
 		rc = pnet_ps_set_internal(true);
 	}
 	if (rc == 0) {
-		rc = pnet_tcp_connect_internal(0, ip, port);
+		rc = pnet_tcp_connect_internal(ip, port);
 	}
 	if (rc == 0 && idle_ms > 0U) {
 		k_msleep(idle_ms);
 	}
 	if (rc == 0) {
-		rc = pnet_tcp_txrx_once(0, payload);
+		rc = pnet_tcp_txrx_once(payload);
 	}
 
-	(void)pnet_tcp_close_if_open(0);
+	(void)pnet_tcp_close_if_open();
 	(void)pnet_ps_set_internal(false);
 
 	if (rc == 0) {
@@ -1428,16 +1298,6 @@ static int cmd_assert(const struct shell *shell, size_t argc, char **argv)
 	return 0;
 }
 
-static int cmd_reset(const struct shell *shell, size_t argc, char **argv)
-{
-	ARG_UNUSED(argc);
-	ARG_UNUSED(argv);
-
-	shell_print(shell, "Rebooting host...");
-	sys_reboot(SYS_REBOOT_COLD);
-	return 0;
-}
-
 /*enable macro to use wifi MAC read/write APIs*/
 #if 0 
 static void pnet_print_mac(const struct shell *sh, const char *label,
@@ -1557,14 +1417,6 @@ SHELL_STATIC_SUBCMD_SET_CREATE(pnet_subcmds,
 		  cmd_tcp_tx, 2, 0),
 		SHELL_CMD_ARG(tcp_rx, NULL, "tcp rx",
 		  cmd_tcp_rx, 0, 0),
-		SHELL_CMD_ARG(tcp_connect_id, NULL, "tcp_connect_id <id> <IP> <PORT>",
-		  cmd_tcp_connect_id, 4, 0),
-		SHELL_CMD_ARG(tcp_disconnect_id, NULL, "tcp_disconnect_id <id>",
-		  cmd_tcp_disconnect_id, 2, 0),
-		SHELL_CMD_ARG(tcp_tx_id, NULL, "tcp_tx_id <id> <data>",
-		  cmd_tcp_tx_id, 3, 0),
-		SHELL_CMD_ARG(tcp_rx_id, NULL, "tcp_rx_id <id>",
-		  cmd_tcp_rx_id, 2, 0),
 		SHELL_CMD_ARG(resolve, NULL, "resolve <hostname> [method]",
 		  cmd_resolve, 2, 1),
 		SHELL_CMD_ARG(test_tcp_loop, NULL,
@@ -1590,8 +1442,6 @@ SHELL_STATIC_SUBCMD_SET_CREATE(pnet_subcmds,
 		  cmd_test_summary, 1, 0),
 		SHELL_CMD_ARG(assert, NULL, "assert",
 		  cmd_assert, 0, 0),
-		SHELL_CMD_ARG(reset, NULL, "reset/reboot host",
-		  cmd_reset, 0, 0),
 		  SHELL_SUBCMD_SET_END);
 
 SHELL_CMD_REGISTER(pnet, &pnet_subcmds, "pnet commands", NULL);

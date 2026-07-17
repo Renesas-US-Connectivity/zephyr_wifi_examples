@@ -9,7 +9,7 @@ CONFIG_GPIO=y
 
 # Wi-Fi Configuration
 CONFIG_WIFI=y
-CONFIG_REBOOT=y
+
 CONFIG_SHELL=y
 CONFIG_SHELL_STACK_SIZE=10240
 
@@ -18,20 +18,18 @@ CONFIG_INIT_STACKS=y
 CONFIG_THREAD_STACK_INFO=y
 CONFIG_STACK_CANARIES=y
 CONFIG_SPIN_VALIDATE=n
-# Synchronous getaddrinfo() uses this as its DNS query timeout. The default
-# (2000 ms) is too short for a DPM cold-wake + eRPC/SPI + network round-trip
-# (~2.4 s), which cancels the in-flight query (DNS_EAI_CANCELED = -101) just
-# before the reply arrives. Give it enough budget to cover the cold wake.
-CONFIG_NET_SOCKETS_DNS_TIMEOUT=10000
-# Retry within that budget instead of a single long attempt.
-CONFIG_NET_SOCKETS_DNS_BACKOFF_INTERVAL=5000
- 
+
 # Network Configuration
 CONFIG_NETWORKING=y
 CONFIG_NET_NATIVE=y
 CONFIG_NET_IPV4=y
 CONFIG_NET_IPV6=n
 CONFIG_NET_TCP=y
+CONFIG_MQTT_LIB=y
+CONFIG_MQTT_LIB_TLS=y
+CONFIG_TLS_CREDENTIALS=y
+CONFIG_NET_SOCKETS_SOCKOPT_TLS=y
+CONFIG_MBEDTLS=y
 CONFIG_NET_DHCPV4=y
 CONFIG_DNS_RESOLVER=y
 CONFIG_NET_CONFIG_SETTINGS=y
