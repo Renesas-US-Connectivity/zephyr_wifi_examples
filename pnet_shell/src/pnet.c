@@ -456,6 +456,72 @@ static int cmd_tcp_rx_id(const struct shell *sh, size_t argc, char *argv[])
 	return 0;
 }
 
+static int cmd_tcp_tx_loop_id(const struct shell *sh, size_t argc, char **argv)
+{
+	uint32_t id;
+	uint32_t count;
+	uint32_t interval_ms;
+	uint32_t i;
+	const char *payload = "PING";
+	struct pnet_test_stats stats;
+
+	if (argc < 4 || argc > 5) {
+		shell_error(sh,
+			    "Usage: pnet tcp_tx_loop_id <id> <count> <interval_ms> [payload]");
+		return 1;
+	}
+
+	if (!parse_u32_arg(argv[1], &id) || id >= PNET_MAX_SOCKETS ||
+	    !parse_u32_arg(argv[2], &count) || count == 0U ||
+	    !parse_u32_arg(argv[3], &interval_ms)) {
+		shell_error(sh, "Invalid arguments");
+		return 1;
+	}
+
+	if (argc == 5) {
+		payload = argv[4];
+	}
+
+	if (tsocks[id] < 0) {
+		shell_error(sh,
+			    "Socket id %u not connected. Use: pnet tcp_connect_id %u <ip> <port>",
+			    id, id);
+		return 1;
+	}
+
+	test_stats_reset(&stats);
+	shell_print(sh, "TEST_START,TC-TCP-TX-LOOP-ID,id=%u,count=%u", id, count);
+
+	for (i = 0U; i < count; i++) {
+		int rc;
+		int64_t t0 = k_uptime_get();
+
+		rc = pnet_tcp_txrx_once((int)id, payload);
+		if (rc == 0) {
+			shell_print(sh,
+				    "TC-TCP-TX-LOOP-ID,id=%u,iter=%u/%u,status=PASS",
+				    id, i + 1U, count);
+			test_stats_add(&stats, true, 0, k_uptime_get() - t0);
+		} else {
+			shell_print(sh,
+				    "TC-TCP-TX-LOOP-ID,id=%u,iter=%u/%u,status=FAIL,err=%d",
+				    id, i + 1U, count, rc);
+			test_stats_add(&stats, false, rc, 0);
+			break;
+		}
+
+		if (interval_ms > 0U && (i + 1U) < count) {
+			k_msleep(interval_ms);
+		}
+	}
+
+	test_stats_print(sh, "TC-TCP-TX-LOOP-ID", &stats);
+	shell_print(sh, "TEST_END,TC-TCP-TX-LOOP-ID,id=%u,result=%s",
+		    id, (stats.fail == 0U) ? "PASS" : "FAIL");
+
+	return (stats.fail == 0U) ? 0 : 1;
+}
+
 #ifdef CONFIG_DNS_RESOLVER
 static void dns_resolve_cb(enum dns_resolve_status status,
 			   struct dns_addrinfo *info, void *user_data)
@@ -1563,6 +1629,9 @@ SHELL_STATIC_SUBCMD_SET_CREATE(pnet_subcmds,
 		  cmd_tcp_disconnect_id, 2, 0),
 		SHELL_CMD_ARG(tcp_tx_id, NULL, "tcp_tx_id <id> <data>",
 		  cmd_tcp_tx_id, 3, 0),
+		SHELL_CMD_ARG(tcp_tx_loop_id, NULL,
+		  "tcp_tx_loop_id <id> <count> <interval_ms> [payload]",
+		  cmd_tcp_tx_loop_id, 4, 1),
 		SHELL_CMD_ARG(tcp_rx_id, NULL, "tcp_rx_id <id>",
 		  cmd_tcp_rx_id, 2, 0),
 		SHELL_CMD_ARG(resolve, NULL, "resolve <hostname> [method]",
