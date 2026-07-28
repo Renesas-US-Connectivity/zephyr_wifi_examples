@@ -13,18 +13,26 @@
 #include <zephyr/net/socket_offload.h>
 #include <zephyr/sys/__assert.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/sys/reboot.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
 #include <zephyr/autoconf.h>
 
+/* MQTT support merged from pnet_mqtt.c */
+#include <zephyr/kernel.h>
+#include <zephyr/net/mqtt.h>
+#if defined(CONFIG_MQTT_LIB_TLS)
+#include <zephyr/net/tls_credentials.h>
+#include "ca_cert.h"
+#endif
+
 #if DT_NODE_EXISTS(DT_NODELABEL(cdc_ncm_eth0))
 #define HAS_USB_ETH
 #include <sample_usbd.h>
 #include <zephyr/net/net_config.h>
 #endif
-#include <zephyr/sys/reboot.h>
 
 
 #ifdef CONFIG_SHELL
@@ -47,6 +55,10 @@ static int cmd_init(const struct shell *shell, size_t argc, char **argv)
 
 #define PNET_MAX_SOCKETS 4
 static int tsocks[PNET_MAX_SOCKETS] = {-1, -1, -1, -1};
+
+static int tsock = -1;
+static int usock = -1;
+static struct sockaddr_in g_udp_peer;  /* peer addr for sendto/recvfrom */
 
 struct pnet_test_stats {
 	uint32_t pass;
@@ -148,6 +160,17 @@ static int pnet_tcp_close_if_open(int id)
 	return 0;
 }
 
+static int pnet_udp_close_if_open(void)
+{
+	if (usock >= 0) {
+		(void)zsock_close(usock);
+		usock = -1;
+	}
+
+	memset(&g_udp_peer, 0, sizeof(g_udp_peer));
+	return 0;
+}
+
 static int pnet_tcp_connect_internal(int id, const char *ip, uint16_t port)
 {
 	if (id < 0 || id >= PNET_MAX_SOCKETS) {
@@ -184,6 +207,52 @@ static int pnet_tcp_connect_internal(int id, const char *ip, uint16_t port)
 		pnet_tcp_close_if_open(id);
 		return rc;
 	}
+
+	return 0;
+}
+
+static int pnet_udp_connect_internal(const char *ip, uint16_t remote_port, uint16_t local_port)
+{
+	struct timeval tv = {
+		.tv_sec = 5,
+		.tv_usec = 0,
+	};
+	struct sockaddr_in local_addr = {
+		.sin_family = AF_INET,
+		.sin_port = htons(local_port), /* 0 = OS assigns ephemeral port */
+		.sin_addr = { INADDR_ANY },
+	};
+	int rc;
+
+	pnet_udp_close_if_open();
+
+	memset(&g_udp_peer, 0, sizeof(g_udp_peer));
+	g_udp_peer.sin_family = AF_INET;
+	g_udp_peer.sin_port = htons(remote_port);
+
+	if (zsock_inet_pton(AF_INET, ip, &g_udp_peer.sin_addr) != 1) {
+		return -EINVAL;
+	}
+
+	usock = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+	if (usock < 0) {
+		return -errno;
+	}
+
+	/* Bind to local port — required by eRPC offload to assign a source
+	 * port so the WiFi module can route outgoing frames correctly, and
+	 * to receive incoming UDP datagrams sent to this port.
+	 */
+	rc = zsock_bind(usock, (struct sockaddr *)&local_addr, sizeof(local_addr));
+	if (rc < 0) {
+		rc = -errno;
+		pnet_udp_close_if_open();
+		return rc;
+	}
+
+	/* Set timeouts; ignore errors (offload may not support all options). */
+	(void)zsock_setsockopt(usock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	(void)zsock_setsockopt(usock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
 	return 0;
 }
@@ -303,6 +372,185 @@ static int cmd_tcp_disconnect(const struct shell *sh, size_t argc, char *argv[])
 	return 0;
 }
 
+static int cmd_udp_connect(const struct shell *sh, size_t argc, char *argv[])
+{
+	uint32_t remote_port;
+	uint32_t local_port = 0U; /* 0 = let offload assign ephemeral port */
+	int rc;
+
+	if (argc < 3 || argc > 4) {
+		shell_error(sh, "Usage: pnet udp_connect <remote_ip> <remote_port> [local_port]");
+		return 1;
+	}
+	if (!parse_u32_arg(argv[2], &remote_port) || remote_port == 0U || remote_port > UINT16_MAX) {
+		shell_error(sh, "Invalid remote port");
+		return 1;
+	}
+	if (argc == 4) {
+		if (!parse_u32_arg(argv[3], &local_port) || local_port > UINT16_MAX) {
+			shell_error(sh, "Invalid local port");
+			return 1;
+		}
+	}
+
+	if (usock >= 0) {
+		shell_error(sh, "UDP socket already open. Run pnet udp_disconnect first.");
+		return 1;
+	}
+
+	printk("UDP peer %s:%u  local_port=%u\n", argv[1], remote_port, local_port);
+	rc = pnet_udp_connect_internal(argv[1], (uint16_t)remote_port, (uint16_t)local_port);
+	if (rc) {
+		shell_error(sh, "Failed to open UDP socket (errno=%d)", -rc);
+		return 1;
+	}
+
+	/* Print the actual local port assigned by the offload (important when
+	 * local_port=0 was given and an ephemeral port was chosen). The remote
+	 * peer must send UDP datagrams to this port for udp_rx to receive them.
+	 */
+	{
+		struct sockaddr_in bound;
+		socklen_t bound_len = sizeof(bound);
+
+		if (zsock_getsockname(usock, (struct sockaddr *)&bound, &bound_len) == 0) {
+			shell_print(sh, "UDP connect successful (local port: %u)",
+				    ntohs(bound.sin_port));
+		} else {
+			shell_print(sh, "UDP connect successful");
+		}
+	}
+	return 0;
+}
+
+static int cmd_udp_disconnect(const struct shell *sh, size_t argc, char *argv[])
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (usock < 0) {
+		shell_error(sh, "UDP socket not connected");
+		return 1;
+	}
+
+	zsock_close(usock);
+	usock = -1;
+	shell_print(sh, "UDP disconnect successful");
+
+	return 0;
+}
+
+static int cmd_udp_tx(const struct shell *sh, size_t argc, char *argv[])
+{
+	int rc;
+
+	if (argc != 2) {
+		shell_error(sh, "Invalid number of arguments");
+		return 1;
+	}
+
+	if (usock < 0) {
+		shell_error(sh, "UDP socket not connected");
+		return 1;
+	}
+
+	rc = zsock_sendto(usock, argv[1], strlen(argv[1]), 0,
+			  (struct sockaddr *)&g_udp_peer, sizeof(g_udp_peer));
+	if (rc < 0) {
+		shell_error(sh, "Failed to send UDP data (errno=%d)", errno);
+		return 1;
+	}
+
+	shell_print(sh, "UDP send successful");
+	return 0;
+}
+
+static int cmd_udp_rx(const struct shell *sh, size_t argc, char *argv[])
+{
+	char buf[256];
+	struct sockaddr_in from;
+	socklen_t from_len;
+	char src_str[NET_IPV4_ADDR_LEN];
+	uint32_t timeout_ms = 5000U;
+	struct timeval tv;
+	int rc;
+
+	if (usock < 0) {
+		shell_error(sh, "UDP socket not connected");
+		return 1;
+	}
+
+	if (argc >= 2) {
+		if (!parse_u32_arg(argv[1], &timeout_ms) || timeout_ms == 0U) {
+			shell_error(sh, "Usage: pnet udp_rx [timeout_ms]");
+			return 1;
+		}
+	}
+
+	/*
+	 * Use zsock_poll() for the wall-clock timeout instead of SO_RCVTIMEO.
+	 * The eRPC UDP offload driver silently ignores SO_RCVTIMEO on UDP
+	 * sockets, causing recvfrom() to block indefinitely when no data
+	 * arrives.  zsock_poll() is handled at the Zephyr network layer and
+	 * reliably fires after the requested timeout regardless of the offload.
+	 *
+	 * If poll() reports POLLIN, the offload wake cycle may not yet be
+	 * complete, so recvfrom(MSG_DONTWAIT) is retried a few times with a
+	 * short back-off to avoid a false EAGAIN during the wake-up window.
+	 */
+	(void)tv; /* tv variable unused; kept to avoid compiler warning */
+
+	shell_print(sh, "Waiting for UDP data (%u ms)...", timeout_ms);
+
+	{
+		struct zsock_pollfd pfd = {
+			.fd = usock,
+			.events = ZSOCK_POLLIN,
+		};
+		int poll_rc = zsock_poll(&pfd, 1, (int)timeout_ms);
+
+		if (poll_rc == 0) {
+			shell_print(sh, "UDP rx timeout — no data received in %u ms", timeout_ms);
+			return 0;
+		}
+		if (poll_rc < 0) {
+			shell_error(sh, "poll failed (errno=%d)", errno);
+			return 1;
+		}
+	}
+
+	/* Data reported ready — retry recvfrom with back-off to let the
+	 * offload wake cycle finish before we read.
+	 */
+	from_len = sizeof(from);
+	{
+		int retry;
+
+		rc = -1;
+		for (retry = 0; retry < 5; retry++) {
+			rc = zsock_recvfrom(usock, buf, sizeof(buf) - 1, ZSOCK_MSG_DONTWAIT,
+					    (struct sockaddr *)&from, &from_len);
+			if (rc >= 0 || (errno != EAGAIN && errno != EWOULDBLOCK)) {
+				break;
+			}
+			k_msleep(10);
+		}
+	}
+	if (rc < 0) {
+		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			shell_print(sh, "UDP rx timeout — no data received in %u ms", timeout_ms);
+			return 0;
+		}
+		shell_error(sh, "recvfrom failed (errno=%d)", errno);
+		return 1;
+	}
+	buf[rc] = '\0';
+
+	net_addr_ntop(AF_INET, &from.sin_addr, src_str, sizeof(src_str));
+	shell_print(sh, "UDP recv from %s:%u  len=%d  data: %s",
+		    src_str, ntohs(from.sin_port), rc, buf);
+	return 0;
+}
 static int cmd_tcp_tx(const struct shell *sh, size_t argc, char *argv[])
 {
 	if (tsocks[0] < 0) {
@@ -644,6 +892,635 @@ static int resolv_async_wait(const char *hostname, uint32_t timeout_ms)
 }
 #endif
 
+/* ---------- MQTT merged functionality (from pnet_mqtt.c) ---------- */
+#define PNET_MQTT_DEFAULT_BROKER_HOST "test.mosquitto.org"
+#define PNET_MQTT_DEFAULT_BROKER_PORT 8883U
+#define PNET_MQTT_DEFAULT_CLIENT_ID "pnet-shell-client"
+
+#define PNET_MQTT_MAX_HOST_LEN 63
+#define PNET_MQTT_MAX_CLIENT_ID_LEN 63
+
+#define PNET_MQTT_IO_TIMEOUT_MS 30000
+#define PNET_MQTT_WAKE_SETTLE_MS 300
+
+static struct mqtt_client g_mqtt_client;
+static struct sockaddr_storage g_mqtt_broker;
+static uint8_t g_mqtt_rx_buf[1024];
+static uint8_t g_mqtt_tx_buf[1024];
+
+static bool g_mqtt_connected;
+static bool g_mqtt_connack_received;
+static bool g_mqtt_suback_received;
+static bool g_mqtt_puback_received;
+static uint16_t g_mqtt_puback_msg_id;
+static int g_mqtt_last_evt_result;
+static uint16_t g_mqtt_msg_id = 1U;
+static bool g_in_dpm;
+
+static bool g_mqtt_cfg_valid;
+static char g_mqtt_broker_host[PNET_MQTT_MAX_HOST_LEN + 1];
+static uint16_t g_mqtt_broker_port;
+static char g_mqtt_client_id[PNET_MQTT_MAX_CLIENT_ID_LEN + 1];
+
+static int pnet_mqtt_poll_once(int timeout_ms);
+static int pnet_mqtt_parse_u32(const char *s, uint32_t *out);
+
+static bool g_mqtt_thread_running = false;
+static K_THREAD_STACK_DEFINE(pnet_mqtt_stack, 4096);
+static struct k_thread pnet_mqtt_thread_data;
+static k_tid_t pnet_mqtt_thread_id;
+
+static void pnet_mqtt_thread(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	printk("MQTT background thread started\n");
+
+	while (g_mqtt_thread_running && g_mqtt_connected) {
+		int rc = pnet_mqtt_poll_once(1000);
+
+		if (rc < 0 && rc != -EAGAIN && rc != -ETIMEDOUT) {
+			printk("MQTT poll error: %d, connection may be lost\n", rc);
+			break;
+		}
+
+		k_msleep(100);
+	}
+
+	g_mqtt_thread_running = false;
+	printk("MQTT background thread stopped\n");
+}
+
+#if defined(CONFIG_MQTT_LIB_TLS)
+#define PNET_MQTT_TLS_SEC_TAG 42
+#define PNET_MQTT_TLS_PEER_VERIFY TLS_PEER_VERIFY_NONE
+static sec_tag_t g_mqtt_sec_tags[] = { PNET_MQTT_TLS_SEC_TAG };
+#endif
+
+static void pnet_mqtt_wake_for_io(const char *reason)
+{
+	ARG_UNUSED(reason);
+	if (g_in_dpm) {
+		(void)pnet_ps_set_internal(false);
+		k_msleep(PNET_MQTT_WAKE_SETTLE_MS);
+	}
+}
+
+static void pnet_mqtt_back_to_dpm(void)
+{
+	if (g_mqtt_connected && g_in_dpm) {
+		(void)pnet_ps_set_internal(true);
+	}
+}
+
+static uint16_t pnet_mqtt_next_msg_id(void)
+{
+	g_mqtt_msg_id++;
+	if (g_mqtt_msg_id == 0U) {
+		g_mqtt_msg_id = 1U;
+	}
+
+	return g_mqtt_msg_id;
+}
+
+static int pnet_mqtt_parse_u32(const char *s, uint32_t *out)
+{
+	char *endptr;
+	unsigned long v;
+
+	if (s == NULL || out == NULL) {
+		return -EINVAL;
+	}
+
+	v = strtoul(s, &endptr, 10);
+	if (*s == '\0' || *endptr != '\0' || v > UINT32_MAX) {
+		return -EINVAL;
+	}
+
+	*out = (uint32_t)v;
+	return 0;
+}
+
+static void pnet_mqtt_cfg_set(const char *host, uint16_t port, const char *client_id)
+{
+	snprintk(g_mqtt_broker_host, sizeof(g_mqtt_broker_host), "%s", host);
+	g_mqtt_broker_port = port;
+	snprintk(g_mqtt_client_id, sizeof(g_mqtt_client_id), "%s", client_id);
+	g_mqtt_cfg_valid = true;
+}
+
+static void pnet_mqtt_evt_handler(struct mqtt_client *const c, const struct mqtt_evt *evt)
+{
+	ARG_UNUSED(c);
+
+	switch (evt->type) {
+	case MQTT_EVT_CONNACK:
+		g_mqtt_connack_received = true;
+		g_mqtt_last_evt_result = evt->result;
+		if (evt->result == 0) {
+			g_mqtt_connected = true;
+		}
+		break;
+	case MQTT_EVT_DISCONNECT:
+		g_mqtt_connected = false;
+		g_mqtt_connack_received = false;
+		g_mqtt_suback_received = false;
+		g_mqtt_puback_received = false;
+		break;
+	case MQTT_EVT_SUBACK:
+		g_mqtt_suback_received = true;
+		g_mqtt_last_evt_result = evt->result;
+		break;
+	case MQTT_EVT_PUBACK:
+		g_mqtt_puback_received = true;
+		g_mqtt_puback_msg_id = evt->param.puback.message_id;
+		g_mqtt_last_evt_result = evt->result;
+		break;
+	case MQTT_EVT_PUBLISH: {
+		const struct mqtt_publish_param *pub = &evt->param.publish;
+		size_t remaining = pub->message.payload.len;
+		uint8_t dump[64];
+
+		printk("\nMQTT PUBLISH received on topic '%.*s' (len=%zu, QoS=%d):\n",
+			   pub->message.topic.topic.size, pub->message.topic.topic.utf8,
+			   pub->message.payload.len, pub->message.topic.qos);
+
+		while (remaining > 0U) {
+			int rd = mqtt_read_publish_payload_blocking(c, dump,
+													   MIN(remaining, sizeof(dump) - 1));
+			if (rd <= 0) {
+				break;
+			}
+			dump[rd] = '\0';
+			printk("%s", dump);
+			remaining -= (size_t)rd;
+		}
+		printk("\n\n");
+
+		if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
+			(void)mqtt_publish_qos1_ack(c, &(struct mqtt_puback_param){ .message_id = pub->message_id });
+		}
+		break;
+	}
+	default:
+		break;
+	}
+}
+
+static int pnet_mqtt_resolve_broker(const char *host, uint16_t port,
+					struct sockaddr_storage *out)
+{
+	struct sockaddr_in *broker4 = (struct sockaddr_in *)out;
+	struct zsock_addrinfo hints = { 0 };
+	struct zsock_addrinfo *res = NULL;
+	char port_s[8];
+	int rc;
+
+	memset(out, 0, sizeof(*out));
+
+	broker4->sin_family = AF_INET;
+	broker4->sin_port = htons(port);
+	if (zsock_inet_pton(AF_INET, host, &broker4->sin_addr) == 1) {
+		return 0;
+	}
+
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	snprintk(port_s, sizeof(port_s), "%u", (uint32_t)port);
+	rc = zsock_getaddrinfo(host, port_s, &hints, &res);
+	if (rc != 0 || res == NULL) {
+		printk("zsock_getaddrinfo failed: rc=%d res=%p\n", rc, (void *)res);
+		if (res != NULL) {
+			zsock_freeaddrinfo(res);
+		}
+		return (rc != 0) ? -rc : -ENOENT;
+	}
+
+	memcpy(out, res->ai_addr, MIN((size_t)res->ai_addrlen, sizeof(*out)));
+	zsock_freeaddrinfo(res);
+	return 0;
+}
+
+static int pnet_mqtt_setup_client(const char *host, uint16_t port, const char *client_id)
+{
+	int rc;
+
+	memset(&g_mqtt_client, 0, sizeof(g_mqtt_client));
+	memset(&g_mqtt_broker, 0, sizeof(g_mqtt_broker));
+
+	rc = pnet_mqtt_resolve_broker(host, port, &g_mqtt_broker);
+	if (rc != 0) {
+		return rc;
+	}
+
+	mqtt_client_init(&g_mqtt_client);
+	g_mqtt_client.broker = &g_mqtt_broker;
+	g_mqtt_client.evt_cb = pnet_mqtt_evt_handler;
+	g_mqtt_client.client_id.utf8 = (uint8_t *)client_id;
+	g_mqtt_client.client_id.size = strlen(client_id);
+	g_mqtt_client.keepalive = 45;
+	g_mqtt_client.protocol_version = MQTT_VERSION_3_1_1;
+	g_mqtt_client.rx_buf = g_mqtt_rx_buf;
+	g_mqtt_client.rx_buf_size = sizeof(g_mqtt_rx_buf);
+	g_mqtt_client.tx_buf = g_mqtt_tx_buf;
+	g_mqtt_client.tx_buf_size = sizeof(g_mqtt_tx_buf);
+
+#if defined(CONFIG_MQTT_LIB_TLS)
+	if (port == 8883U) {
+		int tls_rc = tls_credential_add(PNET_MQTT_TLS_SEC_TAG,
+						TLS_CREDENTIAL_CA_CERTIFICATE,
+						ca_pem, ca_pem_len);
+		if (tls_rc != 0 && tls_rc != -EEXIST) {
+			g_mqtt_last_evt_result = tls_rc;
+			return tls_rc;
+		}
+
+		tls_rc = tls_credential_add(PNET_MQTT_TLS_SEC_TAG,
+						TLS_CREDENTIAL_PUBLIC_CERTIFICATE,
+						client_cert_pem, client_cert_pem_len);
+		if (tls_rc != 0 && tls_rc != -EEXIST) {
+			g_mqtt_last_evt_result = tls_rc;
+			return tls_rc;
+		}
+
+		tls_rc = tls_credential_add(PNET_MQTT_TLS_SEC_TAG,
+						TLS_CREDENTIAL_PRIVATE_KEY,
+						/* old vars could be unavailable depending on cert header variant */
+						// private_key_pem, private_key_pem_len);
+						(const unsigned char *)PRIVATE_KEY, sizeof(PRIVATE_KEY));
+		if (tls_rc != 0 && tls_rc != -EEXIST) {
+			g_mqtt_last_evt_result = tls_rc;
+			return tls_rc;
+		}
+
+		g_mqtt_client.transport.type = MQTT_TRANSPORT_SECURE;
+		g_mqtt_client.transport.tls.config.peer_verify = PNET_MQTT_TLS_PEER_VERIFY;
+		g_mqtt_client.transport.tls.config.cipher_count = 0;
+		g_mqtt_client.transport.tls.config.cipher_list = NULL;
+		g_mqtt_client.transport.tls.config.sec_tag_count =
+			(PNET_MQTT_TLS_PEER_VERIFY == TLS_PEER_VERIFY_NONE) ? 0U : ARRAY_SIZE(g_mqtt_sec_tags);
+		g_mqtt_client.transport.tls.config.sec_tag_list =
+			(PNET_MQTT_TLS_PEER_VERIFY == TLS_PEER_VERIFY_NONE) ? NULL : g_mqtt_sec_tags;
+		g_mqtt_client.transport.tls.config.cert_nocopy = 0;
+	} else {
+		g_mqtt_client.transport.type = MQTT_TRANSPORT_NON_SECURE;
+	}
+#else
+	g_mqtt_client.transport.type = MQTT_TRANSPORT_NON_SECURE;
+#endif
+
+	return 0;
+}
+
+static int pnet_mqtt_disconnect_internal(void)
+{
+	int sock = -1;
+
+	if (g_mqtt_thread_running) {
+		g_mqtt_thread_running = false;
+		k_thread_join(pnet_mqtt_thread_id, K_MSEC(2000));
+	}
+
+#if defined(CONFIG_MQTT_LIB_TLS)
+	if (g_mqtt_client.transport.type == MQTT_TRANSPORT_SECURE) {
+		sock = g_mqtt_client.transport.tls.sock;
+	} else
+#endif
+	if (g_mqtt_client.transport.type == MQTT_TRANSPORT_NON_SECURE) {
+		sock = g_mqtt_client.transport.tcp.sock;
+	}
+
+	if (sock >= 0) {
+		(void)mqtt_disconnect(&g_mqtt_client, NULL);
+		(void)zsock_close(sock);
+	}
+
+	g_mqtt_connected = false;
+	g_mqtt_connack_received = false;
+	g_mqtt_suback_received = false;
+	g_mqtt_puback_received = false;
+	g_mqtt_puback_msg_id = 0U;
+	g_mqtt_last_evt_result = 0;
+	memset(&g_mqtt_client, 0, sizeof(g_mqtt_client));
+
+	return 0;
+}
+
+static int pnet_mqtt_poll_once(int timeout_ms)
+{
+	struct zsock_pollfd pfd;
+	int rc;
+	int sock;
+
+#if defined(CONFIG_MQTT_LIB_TLS)
+	if (g_mqtt_client.transport.type == MQTT_TRANSPORT_SECURE) {
+		sock = g_mqtt_client.transport.tls.sock;
+	} else
+#endif
+	if (g_mqtt_client.transport.type == MQTT_TRANSPORT_NON_SECURE) {
+		sock = g_mqtt_client.transport.tcp.sock;
+	} else {
+		return -ENOTCONN;
+	}
+
+	if (sock < 0) {
+		return -ENOTCONN;
+	}
+
+	pfd.fd = sock;
+	pfd.events = ZSOCK_POLLIN;
+	pfd.revents = 0;
+
+	rc = zsock_poll(&pfd, 1, timeout_ms);
+	if (rc < 0) {
+		return -errno;
+	}
+
+	if (rc > 0 && (pfd.revents & ZSOCK_POLLIN) != 0) {
+		rc = mqtt_input(&g_mqtt_client);
+		if (rc == -EAGAIN || rc == 0) {
+			return 0;
+		}
+		if (rc < 0) {
+			return rc;
+		}
+	}
+
+	if (g_mqtt_connected) {
+		rc = mqtt_live(&g_mqtt_client);
+		if (rc == -EAGAIN || rc == 0) {
+			return 0;
+		}
+		return rc;
+	}
+
+	return 0;
+}
+
+static int pnet_mqtt_wait_for_flag(bool *flag, int timeout_ms)
+{
+	int64_t end = k_uptime_get() + timeout_ms;
+
+	while (!(*flag) && k_uptime_get() < end) {
+		int rc = pnet_mqtt_poll_once(200);
+		if (rc < 0) {
+			return rc;
+		}
+	}
+
+	return *flag ? 0 : -ETIMEDOUT;
+}
+
+static int pnet_mqtt_connect_internal(const char *host, uint16_t port, const char *client_id)
+{
+	int rc;
+
+	rc = pnet_mqtt_disconnect_internal();
+	if (rc != 0) {
+		return rc;
+	}
+
+	rc = pnet_mqtt_setup_client(host, port, client_id);
+	if (rc != 0) {
+		g_mqtt_last_evt_result = rc;
+		return rc;
+	}
+
+	g_mqtt_connack_received = false;
+	g_mqtt_last_evt_result = 0;
+
+	rc = mqtt_connect(&g_mqtt_client);
+	if (rc != 0) {
+		g_mqtt_last_evt_result = rc;
+		(void)pnet_mqtt_disconnect_internal();
+		return rc;
+	}
+
+	rc = pnet_mqtt_wait_for_flag(&g_mqtt_connack_received, PNET_MQTT_IO_TIMEOUT_MS);
+	if (rc != 0 || g_mqtt_last_evt_result != 0 || !g_mqtt_connected) {
+		if (rc != 0 && g_mqtt_last_evt_result == 0) {
+			g_mqtt_last_evt_result = rc;
+		}
+		(void)pnet_mqtt_disconnect_internal();
+		return (rc != 0) ? rc : -EIO;
+	}
+
+	pnet_mqtt_cfg_set(host, port, client_id);
+
+	g_mqtt_thread_running = true;
+	pnet_mqtt_thread_id = k_thread_create(&pnet_mqtt_thread_data, pnet_mqtt_stack,
+						K_THREAD_STACK_SIZEOF(pnet_mqtt_stack),
+						pnet_mqtt_thread,
+						NULL, NULL, NULL,
+						K_PRIO_PREEMPT(7), 0, K_NO_WAIT);
+	k_thread_name_set(pnet_mqtt_thread_id, "pnet_mqtt_poll");
+
+	return 0;
+}
+
+static int pnet_mqtt_ensure_connected(void)
+{
+	if (g_mqtt_connected) {
+		return 0;
+	}
+
+	if (!g_mqtt_cfg_valid) {
+		return -ENOTCONN;
+	}
+
+	return pnet_mqtt_connect_internal(g_mqtt_broker_host, g_mqtt_broker_port, g_mqtt_client_id);
+}
+
+int cmd_mqtt_connect(const struct shell *sh, size_t argc, char *argv[])
+{
+	const char *host = PNET_MQTT_DEFAULT_BROKER_HOST;
+	const char *client_id = PNET_MQTT_DEFAULT_CLIENT_ID;
+	uint32_t port_u32 = PNET_MQTT_DEFAULT_BROKER_PORT;
+	uint16_t port;
+	int rc;
+
+	if (argc > 1) {
+		host = argv[1];
+	}
+	if (argc > 2) {
+		rc = pnet_mqtt_parse_u32(argv[2], &port_u32);
+		if (rc != 0) {
+			shell_error(sh, "Invalid port");
+			return 1;
+		}
+	}
+	if (argc > 3) {
+		client_id = argv[3];
+	}
+	if (argc > 4) {
+		shell_error(sh, "Usage: pnet mqtt_connect [broker_host_or_ip] [port] [client_id]");
+		return 1;
+	}
+	if (port_u32 == 0U || port_u32 > UINT16_MAX) {
+		shell_error(sh, "Invalid port");
+		return 1;
+	}
+
+	port = (uint16_t)port_u32;
+
+	pnet_mqtt_wake_for_io("mqtt_connect");
+	rc = pnet_mqtt_connect_internal(host, port, client_id);
+	pnet_mqtt_back_to_dpm();
+
+	if (rc != 0) {
+		shell_error(sh, "MQTT connect failed (%d), detail=%d", rc, g_mqtt_last_evt_result);
+		return 1;
+	}
+
+	shell_print(sh, "MQTT connect successful: %s:%u", host, (uint32_t)port);
+	return 0;
+}
+
+int cmd_mqtt_publish(const struct shell *sh, size_t argc, char *argv[])
+{
+	struct mqtt_publish_param param = { 0 };
+	enum mqtt_qos qos = MQTT_QOS_0_AT_MOST_ONCE;
+	uint32_t qos_u32 = 0U;
+	uint16_t msg_id;
+	int rc;
+
+	if (argc < 3 || argc > 4) {
+		shell_error(sh, "Usage: pnet mqtt_publish <topic> <payload> [qos:0|1]");
+		return 1;
+	}
+	if (argc == 4) {
+		rc = pnet_mqtt_parse_u32(argv[3], &qos_u32);
+		if (rc != 0 || qos_u32 > 1U) {
+			shell_error(sh, "Invalid qos, use 0 or 1");
+			return 1;
+		}
+		qos = (qos_u32 == 0U) ? MQTT_QOS_0_AT_MOST_ONCE : MQTT_QOS_1_AT_LEAST_ONCE;
+	}
+
+	pnet_mqtt_wake_for_io("mqtt_publish");
+
+	rc = pnet_mqtt_ensure_connected();
+	if (rc != 0) {
+		shell_error(sh, "MQTT not connected (%d)", rc);
+		pnet_mqtt_back_to_dpm();
+		return 1;
+	}
+
+	msg_id = pnet_mqtt_next_msg_id();
+	param.message.topic.qos = qos;
+	param.message.topic.topic.utf8 = (uint8_t *)argv[1];
+	param.message.topic.topic.size = strlen(argv[1]);
+	param.message.payload.data = (uint8_t *)argv[2];
+	param.message.payload.len = strlen(argv[2]);
+	param.message_id = msg_id;
+	param.dup_flag = 0U;
+	param.retain_flag = 0U;
+
+	g_mqtt_puback_received = false;
+	g_mqtt_puback_msg_id = 0U;
+	g_mqtt_last_evt_result = 0;
+
+	rc = mqtt_publish(&g_mqtt_client, &param);
+	if (rc != 0) {
+		shell_error(sh, "mqtt_publish failed (%d)", rc);
+		pnet_mqtt_back_to_dpm();
+		return 1;
+	}
+
+	if (qos == MQTT_QOS_1_AT_LEAST_ONCE) {
+		rc = pnet_mqtt_wait_for_flag(&g_mqtt_puback_received, PNET_MQTT_IO_TIMEOUT_MS);
+		if (rc != 0 || g_mqtt_last_evt_result != 0 || g_mqtt_puback_msg_id != msg_id) {
+			shell_error(sh, "MQTT PUBACK failed (%d, evt=%d)", rc, g_mqtt_last_evt_result);
+			pnet_mqtt_back_to_dpm();
+			return 1;
+		}
+	} else {
+		(void)pnet_mqtt_poll_once(100);
+	}
+
+	shell_print(sh, "MQTT publish successful: topic=%s qos=%u", argv[1],
+			(qos == MQTT_QOS_0_AT_MOST_ONCE) ? 0U : 1U);
+	pnet_mqtt_back_to_dpm();
+	return 0;
+}
+
+int cmd_mqtt_subscribe(const struct shell *sh, size_t argc, char *argv[])
+{
+	struct mqtt_topic topic = { 0 };
+	struct mqtt_subscription_list sub_list = { 0 };
+	enum mqtt_qos qos = MQTT_QOS_1_AT_LEAST_ONCE;
+	uint32_t qos_u32 = 1U;
+	int rc;
+
+	if (argc < 2 || argc > 3) {
+		shell_error(sh, "Usage: pnet mqtt_subscribe <topic> [qos:0|1]");
+		return 1;
+	}
+	if (argc == 3) {
+		rc = pnet_mqtt_parse_u32(argv[2], &qos_u32);
+		if (rc != 0 || qos_u32 > 1U) {
+			shell_error(sh, "Invalid qos, use 0 or 1");
+			return 1;
+		}
+		qos = (qos_u32 == 0U) ? MQTT_QOS_0_AT_MOST_ONCE : MQTT_QOS_1_AT_LEAST_ONCE;
+	}
+
+	pnet_mqtt_wake_for_io("mqtt_subscribe");
+
+	rc = pnet_mqtt_ensure_connected();
+	if (rc != 0) {
+		shell_error(sh, "MQTT not connected (%d)", rc);
+		pnet_mqtt_back_to_dpm();
+		return 1;
+	}
+
+	topic.topic.utf8 = (uint8_t *)argv[1];
+	topic.topic.size = strlen(argv[1]);
+	topic.qos = qos;
+
+	sub_list.list = &topic;
+	sub_list.list_count = 1U;
+	sub_list.message_id = pnet_mqtt_next_msg_id();
+
+	g_mqtt_suback_received = false;
+	g_mqtt_last_evt_result = 0;
+
+	rc = mqtt_subscribe(&g_mqtt_client, &sub_list);
+	if (rc != 0) {
+		shell_error(sh, "mqtt_subscribe failed (%d)", rc);
+		pnet_mqtt_back_to_dpm();
+		return 1;
+	}
+
+	rc = pnet_mqtt_wait_for_flag(&g_mqtt_suback_received, PNET_MQTT_IO_TIMEOUT_MS);
+	if (rc != 0 || g_mqtt_last_evt_result != 0) {
+		shell_error(sh, "MQTT SUBACK failed (%d, evt=%d)", rc, g_mqtt_last_evt_result);
+		pnet_mqtt_back_to_dpm();
+		return 1;
+	}
+
+	shell_print(sh, "MQTT subscribe successful: topic=%s qos=%u", argv[1],
+			(qos == MQTT_QOS_0_AT_MOST_ONCE) ? 0U : 1U);
+	pnet_mqtt_back_to_dpm();
+	return 0;
+}
+
+int cmd_mqtt_disconnect(const struct shell *sh, size_t argc, char *argv[])
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	pnet_mqtt_wake_for_io("mqtt_disconnect");
+	(void)pnet_mqtt_disconnect_internal();
+	(void)pnet_ps_set_internal(true);
+	shell_print(sh, "MQTT disconnect successful");
+	g_in_dpm = true;
+	return 0;
+}
+
+/* ---------- end MQTT merged functionality ---------- */
 static int cmd_connect(const struct shell *sh, size_t argc, char *argv[])
 {
 	int rc;
@@ -1623,6 +2500,14 @@ SHELL_STATIC_SUBCMD_SET_CREATE(pnet_subcmds,
 		  cmd_tcp_tx, 2, 0),
 		SHELL_CMD_ARG(tcp_rx, NULL, "tcp rx",
 		  cmd_tcp_rx, 0, 0),
+		SHELL_CMD_ARG(udp_connect, NULL, "udp_connect <remote_ip> <remote_port>",
+		  cmd_udp_connect, 3, 0),
+		SHELL_CMD_ARG(udp_disconnect, NULL, "udp_disconnect",
+		  cmd_udp_disconnect, 0, 0),
+		SHELL_CMD_ARG(udp_tx, NULL, "udp_send <data>",
+		  cmd_udp_tx, 2, 0),
+		SHELL_CMD_ARG(udp_rx, NULL, "udp_rx [timeout_ms]",
+		  cmd_udp_rx, 1, 1),
 		SHELL_CMD_ARG(tcp_connect_id, NULL, "tcp_connect_id <id> <IP> <PORT>",
 		  cmd_tcp_connect_id, 4, 0),
 		SHELL_CMD_ARG(tcp_disconnect_id, NULL, "tcp_disconnect_id <id>",
@@ -1636,6 +2521,18 @@ SHELL_STATIC_SUBCMD_SET_CREATE(pnet_subcmds,
 		  cmd_tcp_rx_id, 2, 0),
 		SHELL_CMD_ARG(resolve, NULL, "resolve <hostname> [method]",
 		  cmd_resolve, 2, 1),
+        SHELL_CMD_ARG(mqtt_connect, NULL,
+		  "mqtt_connect [broker_host_or_ip] [port] [client_id]",
+		  cmd_mqtt_connect, 1, 3),
+		SHELL_CMD_ARG(mqtt_publish, NULL,
+		  "mqtt_publish <topic> <payload> [qos:0|1]",
+		  cmd_mqtt_publish, 3, 1),
+		SHELL_CMD_ARG(mqtt_subscribe, NULL,
+		  "mqtt_subscribe <topic> [qos:0|1]",
+		  cmd_mqtt_subscribe, 2, 1),
+		SHELL_CMD_ARG(mqtt_disconnect, NULL,
+		  "mqtt_disconnect",
+		  cmd_mqtt_disconnect, 1, 0),
 		SHELL_CMD_ARG(test_tcp_loop, NULL,
 		  "test_tcp_loop <ip> <port> <count> <interval_ms> [payload]",
 		  cmd_test_tcp_loop, 5, 1),
