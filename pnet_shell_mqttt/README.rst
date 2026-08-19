@@ -132,6 +132,29 @@ connect the following pins:
 | P0_10         | P0_13 (GPIO)      |
 +---------------+-------------------+
 
+#. nrf54lm20dk + EK-RA6W1 (SPI)
+ 
+To connect the nrf54lm20dk to the EK-RA6W1 using the SPI bus use jumper wires to
+connect the following pins:
+ 
++---------------+-------------------+
+| NRF           | EK-RA6W1          |
++---------------+-------------------+
+| P1_15 (SCK)   | P0_08 (SCK)       |
++---------------+-------------------+
+| P1_12 (CS)    | P0_09 (CS)        |
++---------------+-------------------+
+| P1_13 (MOSI)  | P0_11 (MOSI)      |
++---------------+-------------------+
+| P1_14 (MISO)  | P0_10 (MISO)      |
++---------------+-------------------+
+| P1_10 (INT)   | P0_12 (INT)       |
++---------------+-------------------+
+| P1_11 (RST)   | RST_N (RST)       |
++---------------+-------------------+
+| P0_03         | P0_13 (GPIO)      |
++---------------+-------------------+
+
 Building and Running
 ********************
 
@@ -139,36 +162,41 @@ Build and flash for the EK-RA8M1 connected to the RRQ61051EVZ using the PMOD UAR
 
 .. code-block:: none
 
-   west build pnet_shell -b ek_ra8m1 -p always -DSHIELD=renesas_qciot_rrq61051evz_pmod
+   west build pnet_shell_mqttt -b ek_ra8m1 -p always -DSHIELD=renesas_qciot_rrq61051evz_pmod
    west flash
 
 Build and flash for the EK-RA8M1 connected to the RRQ61051EVZ using the MikroBUS UART interface:
 
 .. code-block:: none
 
-   west build pnet_shell -b ek_ra8m1 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus_uart
+   west build pnet_shell_mqttt -b ek_ra8m1 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus_uart
    west flash
 
 Build and flash for the nrf5340dk connected to the RRQ61051EVZ using the MikroBUS SPI interface:
 
 .. code-block:: none
 
-   west build pnet_shell -b nrf5340dk/nrf5340/cpuapp -p always 
+   west build pnet_shell_mqttt -b nrf5340dk/nrf5340/cpuapp -p always
    west flash
 
 Build and flash for the EK-RA6M4 connected to the RRQ61051EVZ using the MikroBUS SPI interface:
 
 .. code-block:: none
 
-   west build pnet_shell -b ek_ra6m4 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus_spi
+   west build pnet_shell_mqttt -b ek_ra6m4 -p always -DSHIELD=renesas_qciot_rrq61051evz_mikrobus_spi
    west flash
 
 Build and flash for the nrf52840dk connected to the RRQ61051EVZ using the MikroBUS SPI interface:
 
 .. code-block:: none
 
-   west build pnet_shell -b nrf52840dk/nrf52840 -p always 
+   west build pnet_shell_mqttt -b nrf52840dk/nrf52840 -p always 
    west flash
-   
+
+.. code-block:: none
+
+   west build pnet_shell_mqttt -b nrf54lm20dk/nrf54lm20a/cpuapp -p always   west flash
+   west flash
+
 After flashing, you can observe the state of the application via the console.
 
