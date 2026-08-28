@@ -1275,6 +1275,9 @@ static int pnet_mqtt_wait_for_flag(bool *flag, int timeout_ms)
 
 static int pnet_mqtt_connect_internal(const char *host, uint16_t port, const char *client_id)
 {
+	int64_t t_start = k_uptime_get();
+	int64_t t_setup;
+	int64_t t_transport;
 	int rc;
 
 	rc = pnet_mqtt_disconnect_internal();
@@ -1287,6 +1290,8 @@ static int pnet_mqtt_connect_internal(const char *host, uint16_t port, const cha
 		g_mqtt_last_evt_result = rc;
 		return rc;
 	}
+	t_setup = k_uptime_get();
+	printk("[MQTT-TIME] resolve+setup: %lld ms\n", t_setup - t_start);
 
 	g_mqtt_connack_received = false;
 	g_mqtt_last_evt_result = 0;
@@ -1294,11 +1299,17 @@ static int pnet_mqtt_connect_internal(const char *host, uint16_t port, const cha
 	rc = mqtt_connect(&g_mqtt_client);
 	if (rc != 0) {
 		g_mqtt_last_evt_result = rc;
+		printk("[MQTT-TIME] transport connect failed after %lld ms\n",
+		       k_uptime_get() - t_setup);
 		(void)pnet_mqtt_disconnect_internal();
 		return rc;
 	}
+	t_transport = k_uptime_get();
+	printk("[MQTT-TIME] transport connect (TCP/TLS+CONNECT tx): %lld ms\n",
+	       t_transport - t_setup);
 
 	rc = pnet_mqtt_wait_for_flag(&g_mqtt_connack_received, PNET_MQTT_IO_TIMEOUT_MS);
+	printk("[MQTT-TIME] CONNACK wait: %lld ms (rc=%d)\n", k_uptime_get() - t_transport, rc);
 	if (rc != 0 || g_mqtt_last_evt_result != 0 || !g_mqtt_connected) {
 		if (rc != 0 && g_mqtt_last_evt_result == 0) {
 			g_mqtt_last_evt_result = rc;
@@ -1339,6 +1350,8 @@ int cmd_mqtt_connect(const struct shell *sh, size_t argc, char *argv[])
 	const char *client_id = PNET_MQTT_DEFAULT_CLIENT_ID;
 	uint32_t port_u32 = PNET_MQTT_DEFAULT_BROKER_PORT;
 	uint16_t port;
+	int64_t t_start;
+	int64_t elapsed;
 	int rc;
 
 	if (argc > 1) {
@@ -1365,16 +1378,23 @@ int cmd_mqtt_connect(const struct shell *sh, size_t argc, char *argv[])
 
 	port = (uint16_t)port_u32;
 
+	t_start = k_uptime_get();
+	printk("[MQTT-TIME] connect start @ %lld ms uptime\n", t_start);
+
 	pnet_mqtt_wake_for_io("mqtt_connect");
 	rc = pnet_mqtt_connect_internal(host, port, client_id);
 	pnet_mqtt_back_to_dpm();
 
+	elapsed = k_uptime_get() - t_start;
+
 	if (rc != 0) {
-		shell_error(sh, "MQTT connect failed (%d), detail=%d", rc, g_mqtt_last_evt_result);
+		shell_error(sh, "MQTT connect failed (%d), detail=%d, elapsed=%lld ms", rc,
+			    g_mqtt_last_evt_result, elapsed);
 		return 1;
 	}
 
-	shell_print(sh, "MQTT connect successful: %s:%u", host, (uint32_t)port);
+	shell_print(sh, "MQTT connect successful: %s:%u (total %lld ms)", host, (uint32_t)port,
+		    elapsed);
 	return 0;
 }
 
@@ -1384,6 +1404,9 @@ int cmd_mqtt_publish(const struct shell *sh, size_t argc, char *argv[])
 	enum mqtt_qos qos = MQTT_QOS_0_AT_MOST_ONCE;
 	uint32_t qos_u32 = 0U;
 	uint16_t msg_id;
+	int64_t t_start;
+	int64_t t_tx;
+	int64_t elapsed;
 	int rc;
 
 	if (argc < 3 || argc > 4) {
@@ -1399,11 +1422,15 @@ int cmd_mqtt_publish(const struct shell *sh, size_t argc, char *argv[])
 		qos = (qos_u32 == 0U) ? MQTT_QOS_0_AT_MOST_ONCE : MQTT_QOS_1_AT_LEAST_ONCE;
 	}
 
+	t_start = k_uptime_get();
+	printk("[MQTT-TIME] publish start @ %lld ms uptime\n", t_start);
+
 	pnet_mqtt_wake_for_io("mqtt_publish");
 
 	rc = pnet_mqtt_ensure_connected();
 	if (rc != 0) {
-		shell_error(sh, "MQTT not connected (%d)", rc);
+		shell_error(sh, "MQTT not connected (%d), elapsed=%lld ms", rc,
+			    k_uptime_get() - t_start);
 		pnet_mqtt_back_to_dpm();
 		return 1;
 	}
@@ -1424,15 +1451,20 @@ int cmd_mqtt_publish(const struct shell *sh, size_t argc, char *argv[])
 
 	rc = mqtt_publish(&g_mqtt_client, &param);
 	if (rc != 0) {
-		shell_error(sh, "mqtt_publish failed (%d)", rc);
+		shell_error(sh, "mqtt_publish failed (%d), elapsed=%lld ms", rc,
+			    k_uptime_get() - t_start);
 		pnet_mqtt_back_to_dpm();
 		return 1;
 	}
+	t_tx = k_uptime_get();
+	printk("[MQTT-TIME] publish tx: %lld ms\n", t_tx - t_start);
 
 	if (qos == MQTT_QOS_1_AT_LEAST_ONCE) {
 		rc = pnet_mqtt_wait_for_flag(&g_mqtt_puback_received, PNET_MQTT_IO_TIMEOUT_MS);
+		printk("[MQTT-TIME] PUBACK wait: %lld ms (rc=%d)\n", k_uptime_get() - t_tx, rc);
 		if (rc != 0 || g_mqtt_last_evt_result != 0 || g_mqtt_puback_msg_id != msg_id) {
-			shell_error(sh, "MQTT PUBACK failed (%d, evt=%d)", rc, g_mqtt_last_evt_result);
+			shell_error(sh, "MQTT PUBACK failed (%d, evt=%d), elapsed=%lld ms", rc,
+				    g_mqtt_last_evt_result, k_uptime_get() - t_start);
 			pnet_mqtt_back_to_dpm();
 			return 1;
 		}
@@ -1440,8 +1472,9 @@ int cmd_mqtt_publish(const struct shell *sh, size_t argc, char *argv[])
 		(void)pnet_mqtt_poll_once(100);
 	}
 
-	shell_print(sh, "MQTT publish successful: topic=%s qos=%u", argv[1],
-			(qos == MQTT_QOS_0_AT_MOST_ONCE) ? 0U : 1U);
+	elapsed = k_uptime_get() - t_start;
+	shell_print(sh, "MQTT publish successful: topic=%s qos=%u (total %lld ms)", argv[1],
+			(qos == MQTT_QOS_0_AT_MOST_ONCE) ? 0U : 1U, elapsed);
 	pnet_mqtt_back_to_dpm();
 	return 0;
 }
@@ -1452,6 +1485,9 @@ int cmd_mqtt_subscribe(const struct shell *sh, size_t argc, char *argv[])
 	struct mqtt_subscription_list sub_list = { 0 };
 	enum mqtt_qos qos = MQTT_QOS_1_AT_LEAST_ONCE;
 	uint32_t qos_u32 = 1U;
+	int64_t t_start;
+	int64_t t_tx;
+	int64_t elapsed;
 	int rc;
 
 	if (argc < 2 || argc > 3) {
@@ -1467,11 +1503,15 @@ int cmd_mqtt_subscribe(const struct shell *sh, size_t argc, char *argv[])
 		qos = (qos_u32 == 0U) ? MQTT_QOS_0_AT_MOST_ONCE : MQTT_QOS_1_AT_LEAST_ONCE;
 	}
 
+	t_start = k_uptime_get();
+	printk("[MQTT-TIME] subscribe start @ %lld ms uptime\n", t_start);
+
 	pnet_mqtt_wake_for_io("mqtt_subscribe");
 
 	rc = pnet_mqtt_ensure_connected();
 	if (rc != 0) {
-		shell_error(sh, "MQTT not connected (%d)", rc);
+		shell_error(sh, "MQTT not connected (%d), elapsed=%lld ms", rc,
+			    k_uptime_get() - t_start);
 		pnet_mqtt_back_to_dpm();
 		return 1;
 	}
@@ -1489,20 +1529,26 @@ int cmd_mqtt_subscribe(const struct shell *sh, size_t argc, char *argv[])
 
 	rc = mqtt_subscribe(&g_mqtt_client, &sub_list);
 	if (rc != 0) {
-		shell_error(sh, "mqtt_subscribe failed (%d)", rc);
+		shell_error(sh, "mqtt_subscribe failed (%d), elapsed=%lld ms", rc,
+			    k_uptime_get() - t_start);
 		pnet_mqtt_back_to_dpm();
 		return 1;
 	}
+	t_tx = k_uptime_get();
+	printk("[MQTT-TIME] subscribe tx: %lld ms\n", t_tx - t_start);
 
 	rc = pnet_mqtt_wait_for_flag(&g_mqtt_suback_received, PNET_MQTT_IO_TIMEOUT_MS);
+	printk("[MQTT-TIME] SUBACK wait: %lld ms (rc=%d)\n", k_uptime_get() - t_tx, rc);
 	if (rc != 0 || g_mqtt_last_evt_result != 0) {
-		shell_error(sh, "MQTT SUBACK failed (%d, evt=%d)", rc, g_mqtt_last_evt_result);
+		shell_error(sh, "MQTT SUBACK failed (%d, evt=%d), elapsed=%lld ms", rc,
+			    g_mqtt_last_evt_result, k_uptime_get() - t_start);
 		pnet_mqtt_back_to_dpm();
 		return 1;
 	}
 
-	shell_print(sh, "MQTT subscribe successful: topic=%s qos=%u", argv[1],
-			(qos == MQTT_QOS_0_AT_MOST_ONCE) ? 0U : 1U);
+	elapsed = k_uptime_get() - t_start;
+	shell_print(sh, "MQTT subscribe successful: topic=%s qos=%u (total %lld ms)", argv[1],
+			(qos == MQTT_QOS_0_AT_MOST_ONCE) ? 0U : 1U, elapsed);
 	pnet_mqtt_back_to_dpm();
 	return 0;
 }
