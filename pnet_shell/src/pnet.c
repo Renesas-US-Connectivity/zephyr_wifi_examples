@@ -1652,6 +1652,30 @@ static int cmd_connect_bssid(const struct shell *sh, size_t argc, char *argv[])
 	return 0;
 }
 
+static int cmd_fw_version(const struct shell *sh, size_t argc, char **argv)
+{
+	struct net_if *iface = net_if_get_default();
+	struct wifi_version version = { 0 };
+	int rc;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	/* Routed by net_mgmt to erpc_wifi_mgmt_get_version() in the driver */
+	rc = net_mgmt(NET_REQUEST_WIFI_VERSION, iface, &version, sizeof(version));
+	if (rc) {
+		shell_error(sh, "Failed to get WiFi version (%d)", rc);
+		return 1;
+	}
+
+	shell_print(sh, "WiFi driver version: %s",
+		    version.drv_version ? version.drv_version : "unknown");
+	shell_print(sh, "WiFi firmware version: %s",
+		    version.fw_version ? version.fw_version : "unknown");
+
+	return 0;
+}
+
 static int cmd_wifi_psr(const struct shell *shell, size_t argc, char **argv)
 {
 	ARG_UNUSED(shell);
@@ -2486,6 +2510,8 @@ SHELL_STATIC_SUBCMD_SET_CREATE(pnet_subcmds,
 		// Old: connect_bssid required psk (argc=4); now psk is optional (argc=3 or 4)
 		SHELL_CMD_ARG(connect_bssid, NULL, "connect_bssid <ssid> [psk] <bssid>",
 		  cmd_connect_bssid, 3, 1),
+		SHELL_CMD_ARG(fw_version, NULL, "query WiFi driver/firmware version",
+		  cmd_fw_version, 0, 0),
 		SHELL_CMD_ARG(psr, NULL, "Enable PS at module",
 		  cmd_wifi_psr, 0, 0),
 		SHELL_CMD_ARG(ps, NULL, "Enable PS",
