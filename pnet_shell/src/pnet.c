@@ -53,6 +53,35 @@ static int cmd_init(const struct shell *shell, size_t argc, char **argv)
 	return 0;
 }
 
+/* Directly drives net_if_down() on the default iface to reproduce the erpc_wifi disable crash */
+static int cmd_iface_down(const struct shell *shell, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	struct net_if *iface = net_if_get_default();
+
+	shell_print(shell, "Issuing net_if_down() on iface %d", net_if_get_by_iface(iface));
+	int ret = net_if_down(iface);
+	shell_print(shell, "net_if_down() returned %d", ret);
+
+	return ret;
+}
+
+static int cmd_iface_up(const struct shell *shell, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	struct net_if *iface = net_if_get_default();
+
+	shell_print(shell, "Issuing net_if_up() on iface %d", net_if_get_by_iface(iface));
+	int ret = net_if_up(iface);
+	shell_print(shell, "net_if_up() returned %d", ret);
+
+	return ret;
+}
+
 #define PNET_MAX_SOCKETS 4
 static int tsocks[PNET_MAX_SOCKETS] = {-1, -1, -1, -1};
 
@@ -2495,6 +2524,10 @@ static int cmd_otp_write_mac(const struct shell *sh, size_t argc, char **argv)
 SHELL_STATIC_SUBCMD_SET_CREATE(pnet_subcmds,
 		SHELL_CMD_ARG(init, NULL, "init wifi interface",
 		  cmd_init, 0, 0),
+		SHELL_CMD_ARG(iface_down, NULL, "issue net_if_down() on default iface",
+		  cmd_iface_down, 0, 0),
+		SHELL_CMD_ARG(iface_up, NULL, "issue net_if_up() on default iface",
+		  cmd_iface_up, 0, 0),
 /*enable macro to use wifi MAC read/write APIs*/
 #if 0 
 		SHELL_CMD(get_mac, NULL, "Read effective WiFi MAC (spoof/NVRAM/OTP/fallback)",
