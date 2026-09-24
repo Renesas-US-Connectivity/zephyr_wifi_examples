@@ -1008,7 +1008,7 @@ static void pnet_mqtt_thread(void *p1, void *p2, void *p3)
 			break;
 		}
 
-		k_msleep(100);
+		k_msleep(50);
 	}
 
 	g_mqtt_thread_running = false;
