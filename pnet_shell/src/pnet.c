@@ -37,6 +37,8 @@
 
 #ifdef CONFIG_SHELL
 
+static bool g_in_dpm;
+
 static int cmd_init(const struct shell *shell, size_t argc, char **argv)
 {
 	(void)shell;
@@ -53,17 +55,31 @@ static int cmd_init(const struct shell *shell, size_t argc, char **argv)
 	return 0;
 }
 
-/* Directly drives net_if_down() on the default iface to reproduce the erpc_wifi disable crash */
+static void pnet_app_close_all(const struct shell *sh, const char *why);
+static void pnet_app_after_iface_down(const struct shell *sh);
+static void pnet_app_after_iface_up(const struct shell *sh);
+
 static int cmd_iface_down(const struct shell *shell, size_t argc, char **argv)
 {
-	ARG_UNUSED(argc);
-	ARG_UNUSED(argv);
-
 	struct net_if *iface = net_if_get_default();
+	bool abrupt = (argc > 1) && (strcmp(argv[1], "abrupt") == 0);
+
+	if (argc > 1 && !abrupt) {
+		shell_error(shell, "Usage: pnet iface_down [abrupt]");
+		return -EINVAL;
+	}
+
+	if (abrupt) {
+		shell_print(shell, "[pnet] iface_down abrupt: app sockets are left open");
+	} else {
+		pnet_app_close_all(shell, "iface_down");
+	}
 
 	shell_print(shell, "Issuing net_if_down() on iface %d", net_if_get_by_iface(iface));
 	int ret = net_if_down(iface);
 	shell_print(shell, "net_if_down() returned %d", ret);
+
+	pnet_app_after_iface_down(shell);
 
 	return ret;
 }
@@ -78,6 +94,8 @@ static int cmd_iface_up(const struct shell *shell, size_t argc, char **argv)
 	shell_print(shell, "Issuing net_if_up() on iface %d", net_if_get_by_iface(iface));
 	int ret = net_if_up(iface);
 	shell_print(shell, "net_if_up() returned %d", ret);
+
+	pnet_app_after_iface_up(shell);
 
 	return ret;
 }
@@ -182,7 +200,11 @@ static int pnet_tcp_close_if_open(int id)
 	}
 
 	if (tsocks[id] >= 0) {
-		(void)zsock_close(tsocks[id]);
+		int fd = tsocks[id];
+		int rc = zsock_close(fd);
+
+		printk("[pnet] TCP id=%d close fd=%d rc=%d errno=%d\n", id, fd, rc,
+		       (rc < 0) ? errno : 0);
 		tsocks[id] = -1;
 	}
 
@@ -192,7 +214,10 @@ static int pnet_tcp_close_if_open(int id)
 static int pnet_udp_close_if_open(void)
 {
 	if (usock >= 0) {
-		(void)zsock_close(usock);
+		int fd = usock;
+		int rc = zsock_close(fd);
+
+		printk("[pnet] UDP close fd=%d rc=%d errno=%d\n", fd, rc, (rc < 0) ? errno : 0);
 		usock = -1;
 	}
 
@@ -224,8 +249,10 @@ static int pnet_tcp_connect_internal(int id, const char *ip, uint16_t port)
 
 	tsocks[id] = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 	if (tsocks[id] < 0) {
+		printk("[pnet] TCP id=%d socket() failed errno=%d\n", id, errno);
 		return -errno;
 	}
+	printk("[pnet] TCP id=%d socket fd=%d\n", id, tsocks[id]);
 
 	(void)zsock_setsockopt(tsocks[id], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 	(void)zsock_setsockopt(tsocks[id], SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
@@ -233,6 +260,7 @@ static int pnet_tcp_connect_internal(int id, const char *ip, uint16_t port)
 	rc = zsock_connect(tsocks[id], (struct sockaddr *)&addr, sizeof(addr));
 	if (rc < 0) {
 		rc = -errno;
+		printk("[pnet] TCP id=%d connect fd=%d failed errno=%d\n", id, tsocks[id], -rc);
 		pnet_tcp_close_if_open(id);
 		return rc;
 	}
@@ -267,11 +295,8 @@ static int pnet_udp_connect_internal(const char *ip, uint16_t remote_port, uint1
 	if (usock < 0) {
 		return -errno;
 	}
+	printk("[pnet] UDP socket fd=%d\n", usock);
 
-	/* Bind to local port — required by eRPC offload to assign a source
-	 * port so the WiFi module can route outgoing frames correctly, and
-	 * to receive incoming UDP datagrams sent to this port.
-	 */
 	rc = zsock_bind(usock, (struct sockaddr *)&local_addr, sizeof(local_addr));
 	if (rc < 0) {
 		rc = -errno;
@@ -279,7 +304,6 @@ static int pnet_udp_connect_internal(const char *ip, uint16_t remote_port, uint1
 		return rc;
 	}
 
-	/* Set timeouts; ignore errors (offload may not support all options). */
 	(void)zsock_setsockopt(usock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 	(void)zsock_setsockopt(usock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
@@ -326,6 +350,7 @@ static int pnet_ps_set_internal(bool enable)
 		return -EIO;
 	}
 
+	g_in_dpm = true;
 	return 0;
 }
 
@@ -462,8 +487,7 @@ static int cmd_udp_disconnect(const struct shell *sh, size_t argc, char *argv[])
 		return 1;
 	}
 
-	zsock_close(usock);
-	usock = -1;
+	pnet_udp_close_if_open();
 	shell_print(sh, "UDP disconnect successful");
 
 	return 0;
@@ -589,7 +613,7 @@ static int cmd_tcp_tx(const struct shell *sh, size_t argc, char *argv[])
 
 	int rc = zsock_send(tsocks[0], argv[1], strlen(argv[1]), 0);
 	if (rc < 0) {
-		shell_error(sh, "Failed to send data");
+		shell_error(sh, "Failed to send data (errno=%d)", errno);
 		return 1;
 	}
 	shell_print(sh, "TCP send successful");
@@ -607,10 +631,14 @@ static int cmd_tcp_rx(const struct shell *sh, size_t argc, char *argv[])
 	char buf[1024];
 	int rc = zsock_recv(tsocks[0], buf, sizeof(buf) - 1, 0);
 	if (rc < 0) {
-		shell_error(sh, "Failed to receive data");
+		shell_error(sh, "Failed to receive data (errno=%d)", errno);
 		return 1;
 	}
 	buf[rc] = 0;
+	if (rc == 0) {
+		shell_print(sh, "TCP recv: 0 bytes (peer closed / socket invalidated) - run disconnect");
+		return 0;
+	}
 	shell_print(sh, "TCP recv: %s", buf);
 
 	return 0;
@@ -695,7 +723,7 @@ static int cmd_tcp_tx_id(const struct shell *sh, size_t argc, char *argv[])
 
 	int rc = zsock_send(tsocks[id], argv[2], strlen(argv[2]), 0);
 	if (rc < 0) {
-		shell_error(sh, "Failed to send data");
+		shell_error(sh, "Failed to send data (errno=%d)", errno);
 		return 1;
 	}
 	shell_print(sh, "TCP send successful");
@@ -724,10 +752,14 @@ static int cmd_tcp_rx_id(const struct shell *sh, size_t argc, char *argv[])
 	char buf[1024];
 	int rc = zsock_recv(tsocks[id], buf, sizeof(buf) - 1, 0);
 	if (rc < 0) {
-		shell_error(sh, "Failed to receive data");
+		shell_error(sh, "Failed to receive data (errno=%d)", errno);
 		return 1;
 	}
 	buf[rc] = 0;
+	if (rc == 0) {
+		shell_print(sh, "TCP recv: 0 bytes (peer closed / socket invalidated) - run disconnect");
+		return 0;
+	}
 	shell_print(sh, "TCP recv: %s", buf);
 
 	return 0;
@@ -938,13 +970,14 @@ static uint8_t g_mqtt_rx_buf[1024];
 static uint8_t g_mqtt_tx_buf[1024];
 
 static bool g_mqtt_connected;
+/* true only between mqtt_client_init() and teardown; guards against using a zeroed client (fd 0!) */
+static bool g_mqtt_client_ready;
 static bool g_mqtt_connack_received;
 static bool g_mqtt_suback_received;
 static bool g_mqtt_puback_received;
 static uint16_t g_mqtt_puback_msg_id;
 static int g_mqtt_last_evt_result;
 static uint16_t g_mqtt_msg_id = 1U;
-static bool g_in_dpm;
 
 static bool g_mqtt_cfg_valid;
 static char g_mqtt_broker_host[PNET_MQTT_MAX_HOST_LEN + 1];
@@ -1145,6 +1178,7 @@ static int pnet_mqtt_setup_client(const char *host, uint16_t port, const char *c
 	}
 
 	mqtt_client_init(&g_mqtt_client);
+	g_mqtt_client_ready = true;
 	g_mqtt_client.broker = &g_mqtt_broker;
 	g_mqtt_client.evt_cb = pnet_mqtt_evt_handler;
 	g_mqtt_client.client_id.utf8 = (uint8_t *)client_id;
@@ -1203,29 +1237,57 @@ static int pnet_mqtt_setup_client(const char *host, uint16_t port, const char *c
 	return 0;
 }
 
-static int pnet_mqtt_disconnect_internal(void)
+static int pnet_mqtt_get_sock(void)
 {
-	int sock = -1;
-
-	if (g_mqtt_thread_running) {
-		g_mqtt_thread_running = false;
-		k_thread_join(pnet_mqtt_thread_id, K_MSEC(2000));
+	if (!g_mqtt_client_ready) {
+		return -1;
 	}
-
 #if defined(CONFIG_MQTT_LIB_TLS)
 	if (g_mqtt_client.transport.type == MQTT_TRANSPORT_SECURE) {
-		sock = g_mqtt_client.transport.tls.sock;
-	} else
+		return g_mqtt_client.transport.tls.sock;
+	}
 #endif
 	if (g_mqtt_client.transport.type == MQTT_TRANSPORT_NON_SECURE) {
-		sock = g_mqtt_client.transport.tcp.sock;
+		return g_mqtt_client.transport.tcp.sock;
+	}
+	return -1;
+}
+
+static int pnet_mqtt_disconnect_internal(void)
+{
+	int rc;
+
+	if (g_mqtt_thread_running) {
+		printk("[pnet] mqtt teardown: stopping poll thread\n");
+		g_mqtt_thread_running = false;
+		rc = k_thread_join(pnet_mqtt_thread_id, K_MSEC(2000));
+		if (rc != 0) {
+			printk("[pnet] mqtt teardown: poll thread join rc=%d\n", rc);
+		}
 	}
 
-	if (sock >= 0) {
-		(void)mqtt_disconnect(&g_mqtt_client, NULL);
-		(void)zsock_close(sock);
+	if (!g_mqtt_client_ready) {
+		/* Never touch a zeroed client: its socket field reads as fd 0, which
+		 * belongs to someone else (e.g. the DNS resolver).
+		 */
+		printk("[pnet] mqtt teardown: no MQTT client set up, nothing to close\n");
+	} else {
+		printk("[pnet] mqtt teardown: sock=%d connected=%d\n", pnet_mqtt_get_sock(),
+		       g_mqtt_connected);
+
+		if (g_mqtt_connected) {
+			rc = mqtt_disconnect(&g_mqtt_client, NULL);
+			printk("[pnet] mqtt teardown: mqtt_disconnect rc=%d\n", rc);
+		}
+
+		/* Closes the socket only if the MQTT library still has it open, so
+		 * there is no double close of an fd number that may be reused.
+		 */
+		rc = mqtt_abort(&g_mqtt_client);
+		printk("[pnet] mqtt teardown: mqtt_abort rc=%d\n", rc);
 	}
 
+	g_mqtt_client_ready = false;
 	g_mqtt_connected = false;
 	g_mqtt_connack_received = false;
 	g_mqtt_suback_received = false;
@@ -1243,16 +1305,7 @@ static int pnet_mqtt_poll_once(int timeout_ms)
 	int rc;
 	int sock;
 
-#if defined(CONFIG_MQTT_LIB_TLS)
-	if (g_mqtt_client.transport.type == MQTT_TRANSPORT_SECURE) {
-		sock = g_mqtt_client.transport.tls.sock;
-	} else
-#endif
-	if (g_mqtt_client.transport.type == MQTT_TRANSPORT_NON_SECURE) {
-		sock = g_mqtt_client.transport.tcp.sock;
-	} else {
-		return -ENOTCONN;
-	}
+	sock = pnet_mqtt_get_sock();
 
 	if (sock < 0) {
 		return -ENOTCONN;
@@ -1264,7 +1317,20 @@ static int pnet_mqtt_poll_once(int timeout_ms)
 
 	rc = zsock_poll(&pfd, 1, timeout_ms);
 	if (rc < 0) {
+		printk("[pnet] mqtt poll: sock=%d poll failed errno=%d\n", sock, errno);
 		return -errno;
+	}
+
+	if (rc > 0 && (pfd.revents & ZSOCK_POLLIN) == 0 &&
+	    (pfd.revents & (ZSOCK_POLLHUP | ZSOCK_POLLERR | ZSOCK_POLLNVAL)) != 0) {
+		/* Link gone (e.g. iface_down): the library would never notice from
+		 * POLLIN alone, and the poll thread would spin.
+		 */
+		printk("[pnet] mqtt poll: sock=%d revents=0x%x -> connection lost, aborting\n",
+		       sock, pfd.revents);
+		(void)mqtt_abort(&g_mqtt_client);
+		g_mqtt_connected = false;
+		return -ENOTCONN;
 	}
 
 	if (rc > 0 && (pfd.revents & ZSOCK_POLLIN) != 0) {
@@ -1337,6 +1403,7 @@ static int pnet_mqtt_connect_internal(const char *host, uint16_t port, const cha
 	}
 
 	pnet_mqtt_cfg_set(host, port, client_id);
+	printk("[pnet] MQTT connected, sock=%d\n", pnet_mqtt_get_sock());
 
 	g_mqtt_thread_running = true;
 	pnet_mqtt_thread_id = k_thread_create(&pnet_mqtt_thread_data, pnet_mqtt_stack,
@@ -1543,10 +1610,86 @@ int cmd_mqtt_disconnect(const struct shell *sh, size_t argc, char *argv[])
 
 	pnet_mqtt_wake_for_io("mqtt_disconnect");
 	(void)pnet_mqtt_disconnect_internal();
+	if (g_in_dpm){
 	(void)pnet_ps_set_internal(true);
+	}
 	shell_print(sh, "MQTT disconnect successful");
-	g_in_dpm = true;
 	return 0;
+}
+
+/* ---------- iface down/up application cleanup ---------- */
+static void pnet_app_close_all(const struct shell *sh, const char *why)
+{
+	shell_print(sh, "[pnet] %s: closing application sockets", why);
+
+	if (g_mqtt_client_ready || g_mqtt_thread_running) {
+		shell_print(sh, "[pnet]   MQTT: disconnect (connected=%d sock=%d)",
+			    g_mqtt_connected, pnet_mqtt_get_sock());
+		pnet_mqtt_wake_for_io("iface_down");
+		(void)pnet_mqtt_disconnect_internal();
+	} else {
+		shell_print(sh, "[pnet]   MQTT: not set up");
+	}
+
+	for (int id = 0; id < PNET_MAX_SOCKETS; id++) {
+		if (tsocks[id] >= 0) {
+			shell_print(sh, "[pnet]   TCP id=%d fd=%d: close", id, tsocks[id]);
+			(void)pnet_tcp_close_if_open(id);
+		}
+	}
+
+	if (tsock >= 0) {
+		shell_print(sh, "[pnet]   TCP legacy fd=%d: close", tsock);
+		(void)zsock_close(tsock);
+		tsock = -1;
+	}
+
+	if (usock >= 0) {
+		shell_print(sh, "[pnet]   UDP fd=%d: close", usock);
+		(void)pnet_udp_close_if_open();
+	}
+
+	shell_print(sh, "[pnet] %s: application sockets closed", why);
+}
+
+static void pnet_app_report_open_sockets(const struct shell *sh)
+{
+	bool any = false;
+
+	for (int id = 0; id < PNET_MAX_SOCKETS; id++) {
+		if (tsocks[id] >= 0) {
+			shell_print(sh, "[pnet]   still open: TCP id=%d fd=%d -> pnet tcp_disconnect_id %d",
+				    id, tsocks[id], id);
+			any = true;
+		}
+	}
+	if (usock >= 0) {
+		shell_print(sh, "[pnet]   still open: UDP fd=%d -> pnet udp_disconnect", usock);
+		any = true;
+	}
+	if (g_mqtt_client_ready) {
+		shell_print(sh, "[pnet]   still open: MQTT sock=%d -> pnet mqtt_disconnect",
+			    pnet_mqtt_get_sock());
+		any = true;
+	}
+	if (!any) {
+		shell_print(sh, "[pnet]   no application sockets open");
+	}
+}
+
+static void pnet_app_after_iface_down(const struct shell *sh)
+{
+	/* The driver resets power save on every iface cycle (new module boot). */
+	g_in_dpm = false;
+	shell_print(sh, "[pnet] after iface_down:");
+	pnet_app_report_open_sockets(sh);
+}
+
+static void pnet_app_after_iface_up(const struct shell *sh)
+{
+	g_in_dpm = false;
+	shell_print(sh, "[pnet] after iface_up (PS is off until 'pnet ps 1'):");
+	pnet_app_report_open_sockets(sh);
 }
 
 /* ---------- end MQTT merged functionality ---------- */
@@ -2524,8 +2667,8 @@ static int cmd_otp_write_mac(const struct shell *sh, size_t argc, char **argv)
 SHELL_STATIC_SUBCMD_SET_CREATE(pnet_subcmds,
 		SHELL_CMD_ARG(init, NULL, "init wifi interface",
 		  cmd_init, 0, 0),
-		SHELL_CMD_ARG(iface_down, NULL, "issue net_if_down() on default iface",
-		  cmd_iface_down, 0, 0),
+		SHELL_CMD_ARG(iface_down, NULL, "iface_down [abrupt] - close app sockets (unless abrupt) then net_if_down()",
+		  cmd_iface_down, 1, 1),
 		SHELL_CMD_ARG(iface_up, NULL, "issue net_if_up() on default iface",
 		  cmd_iface_up, 0, 0),
 /*enable macro to use wifi MAC read/write APIs*/
