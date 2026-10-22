@@ -1,0 +1,44 @@
+/*
+ * Copyright (c) 2025 Renesas Electronics Corporation
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/ {
+    chosen {
+        /delete-property/ zephyr,wifi;
+    };
+
+    aliases {
+        wakeup-gpio = &gpio_wakeup;
+    };
+
+    gpio_wakeup {
+        compatible = "gpio-leds";
+        gpio_wakeup: wakeup_gpio {
+            /* Map Wakeup GPIO to Arduino pin D4 (P0.04) */
+            gpios = <&gpio0 4 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+            label = "Wakeup GPIO P0.04";
+        };
+    };
+};
+
+&arduino_spi {
+    status = "okay";
+
+    ra6w1_erpc_wifi: ra6w1_erpc_wifi@0 {
+        compatible = "renesas,erpc-wifi-spi";
+        reg = <0>;
+        label = "RA6W1";
+        spi-max-frequency = <200000>;
+        boot-duration-ms = <2000>;
+
+        /* Map INT (Slave-Ready) to Arduino pin D2 (P0.02) */
+        int-gpios = <&gpio0 2 (GPIO_ACTIVE_HIGH | GPIO_PULL_DOWN)>;
+
+        /* Map RESET to Arduino pin D3 (P0.03) */
+        reset-gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;
+
+        status = "okay";
+    };
+};
