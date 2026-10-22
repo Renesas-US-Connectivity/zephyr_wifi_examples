@@ -1,0 +1,53 @@
+/*
+ * Copyright (c) 2025 Renesas Electronics Corporation
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/delete-node/ &qspi;
+/delete-node/ &uart1;
+
+/ {
+    chosen {
+        /delete-property/ zephyr,wifi;
+	};
+};
+
+&pinctrl {
+    spi4_default: spi4_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 14)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 13)>;
+        };
+    };
+    spi4_sleep: spi4_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 17)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 14)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 13)>;
+                    low-power-enable;
+        };
+    };
+};
+
+&spi4 {
+    compatible = "nordic,nrf-spim";
+    status = "okay";
+    cs-gpios = <&gpio0 15 (GPIO_ACTIVE_LOW)>;
+ 
+    pinctrl-0 = <&spi4_default>;
+    pinctrl-1 = <&spi4_sleep>;
+    pinctrl-names = "default", "sleep";
+ 
+    ra6w1_erpc_wifi: ra6w1_erpc_wifi@0 {
+        compatible = "renesas,erpc-wifi-spi";
+        reg = <0>;
+        label = "RA6W1";
+        spi-max-frequency = <200000>;
+        boot-duration-ms = <2000>;
+        int-gpios = <&gpio0 9 GPIO_ACTIVE_LOW>;
+        reset-gpios = <&gpio0 16 GPIO_ACTIVE_LOW>;
+        status = "okay";
+    };
+};
