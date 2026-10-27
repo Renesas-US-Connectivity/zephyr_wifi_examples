@@ -131,7 +131,7 @@ Build and flash for the nrf5340dk connected to the RRQ61051EVZ using the MikroBU
 
 .. code-block:: none
 
-   west build pnet_shell -b nrf5340dk/nrf5340/cpuapp -p always 
+   west build ztest -b nrf5340dk/nrf5340/cpuapp -p always 
    west flash
 
 
@@ -139,7 +139,7 @@ Build and flash for the nrf54lm20dk connected to the RRQ61051EVZ using the Mikro
 
 .. code-block:: none
 
-   west build pnet_shell -b nrf54lm20dk/nrf54lm20a/cpuapp -p always   west flash
+   west build ztest -b nrf54lm20dk/nrf54lm20a/cpuapp -p always   west flash
    west flash
 
 After flashing, you can observe the state of the application via the console.
