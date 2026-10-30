@@ -337,11 +337,23 @@ static int pnet_tcp_txrx_once(int id, const char *payload)
 	return 0;
 }
 
+/* Host idle time before DPM sleep; the driver pushes max(this, 1000) to the NCP as its own hold. */
+#define PNET_PS_TIMEOUT_MS 1000
+
 static int pnet_ps_set_internal(bool enable)
 {
 	struct net_if *iface = net_if_get_default();
 	struct wifi_ps_params params = { 0 };
 	int rc;
+
+	if (enable) {
+		params.type = WIFI_PS_PARAM_TIMEOUT;
+		params.timeout_ms = PNET_PS_TIMEOUT_MS;
+		if (net_mgmt(NET_REQUEST_WIFI_PS, iface, &params, sizeof(params))) {
+			return -EIO;
+		}
+		memset(&params, 0, sizeof(params));
+	}
 
 	params.type = WIFI_PS_PARAM_STATE;
 	params.enabled = enable ? WIFI_PS_ENABLED : WIFI_PS_DISABLED;
@@ -374,7 +386,7 @@ static int pnet_ps_defaults_internal(void)
 
 	memset(&params, 0, sizeof(params));
 	params.type = WIFI_PS_PARAM_TIMEOUT;
-	params.timeout_ms = 3000;
+	params.timeout_ms = PNET_PS_TIMEOUT_MS;
 	if (net_mgmt(NET_REQUEST_WIFI_PS, iface, &params, sizeof(params))) {
 		return -EIO;
 	}
