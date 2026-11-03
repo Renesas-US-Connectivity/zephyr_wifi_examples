@@ -1434,12 +1434,15 @@ static int pnet_mqtt_poll_once(int timeout_ms)
 	return 0;
 }
 
+/* The background poll thread can consume the ACK; a long slice then hides it. */
+#define PNET_MQTT_WAIT_SLICE_MS 20
+
 static int pnet_mqtt_wait_for_flag(bool *flag, int timeout_ms)
 {
 	int64_t end = k_uptime_get() + timeout_ms;
 
 	while (!(*flag) && k_uptime_get() < end) {
-		int rc = pnet_mqtt_poll_once(200);
+		int rc = pnet_mqtt_poll_once(PNET_MQTT_WAIT_SLICE_MS);
 		if (rc < 0) {
 			return rc;
 		}
