@@ -974,7 +974,7 @@ static int resolv_async_wait(const char *hostname, uint32_t timeout_ms)
 #define PNET_MQTT_MAX_CLIENT_ID_LEN 63
 
 #define PNET_MQTT_IO_TIMEOUT_MS 30000
-#define PNET_MQTT_WAKE_SETTLE_MS 300
+#define PNET_MQTT_WAKE_SETTLE_MS 0
 
 static struct mqtt_client g_mqtt_client;
 static struct sockaddr_storage g_mqtt_broker;
@@ -1084,7 +1084,9 @@ static void pnet_mqtt_wake_for_io(const char *reason)
 	ARG_UNUSED(reason);
 	if (g_in_dpm) {
 		(void)pnet_ps_set_internal(false);
-		k_msleep(PNET_MQTT_WAKE_SETTLE_MS);
+		if (PNET_MQTT_WAKE_SETTLE_MS > 0) {
+			k_msleep(PNET_MQTT_WAKE_SETTLE_MS);
+		}
 	}
 }
 
