@@ -1,0 +1,7 @@
+#define ENV_SSID "SSID"
+#define ENV_PSK "PASSWORD"
+#define ENV_DNS_TEST_NAME "www.sunet.se"
+
+#define ENV_ECHO_SERVER_IP "ECHO SERVER IP"
+#define ENV_ECHO_SERVER_PORT 7777
+#define ENV_ECHO_INTERVAL_S 120
