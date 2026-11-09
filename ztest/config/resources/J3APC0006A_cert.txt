@@ -1,0 +1,33 @@
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number:
+            0d:00:2d:bd:27:8d:14:ce:91:c7:a0:95:90:96:e9:19
+        Signature Algorithm: ecdsa-with-SHA256
+        Issuer: O = Yale, OU = Software, CN = Wi-Fi Access Controller, serialNumber = J3APC0006A
+        Validity
+            Not Before: Nov 27 08:16:30 2020 GMT
+            Not After : Dec 30 23:59:59 2099 GMT
+        Subject: O = Yale, OU = Software, CN = Wi-Fi Access Controller, serialNumber = J3APC0006A
+        Subject Public Key Info:
+            Public Key Algorithm: id-ecPublicKey
+                Public-Key: (256 bit)
+                pub:
+                    04:13:86:04:a1:fc:5f:c9:0f:0b:29:20:c2:3f:3f:
+                    20:62:3a:d7:56:99:a0:7c:c8:15:a7:59:e7:d6:3a:
+                    ad:41:6a:b7:a5:24:92:a5:1f:69:16:a2:5d:e9:29:
+                    03:e8:6f:6d:a7:2f:36:2f:2a:f2:29:f0:b8:25:80:
+                    17:83:17:c6:53
+                ASN1 OID: prime256v1
+                NIST CURVE: P-256
+        X509v3 extensions:
+            X509v3 Basic Constraints: 
+                CA:TRUE, pathlen:0
+            X509v3 Key Usage: critical
+                Digital Signature, Non Repudiation, Key Encipherment, Data Encipherment, Key Agreement, Certificate Sign
+    Signature Algorithm: ecdsa-with-SHA256
+    Signature Value:
+        30:44:02:20:45:9d:74:3c:e0:7b:10:51:c5:61:30:e4:35:11:
+        32:33:55:95:ed:d5:ee:90:29:cd:5c:2e:ac:3e:4d:b4:08:35:
+        02:20:1f:c9:23:9f:f1:97:2f:fe:e4:22:11:86:bd:d7:77:76:
+        0f:98:93:2e:08:e5:e2:9e:87:f7:6b:92:ce:f8:c6:65
